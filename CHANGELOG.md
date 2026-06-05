@@ -5,6 +5,46 @@ All notable changes to Cladding are documented here.
 Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-06-05 — A gate that can catch a hidden bug
+
+**In one line:** until now, `clad check` went green whenever *your code's own tests* passed — even if the
+code didn't actually do what the spec asked. 0.5.1 lets the gate run a second, independent check, written
+from the spec *without looking at the code*, so a green gate can finally mean "this matches the spec," not
+just "the author's own tests passed." It also fixes a harmless-but-alarming error that showed up in *every*
+project, and makes writing specs a little less fiddly. **Everything new here is opt-in** — upgrading changes
+nothing until you turn it on.
+
+### Added
+
+- **An independent "did it really match the spec?" check (opt-in).** The gate can now run a spec-derived
+  test suite that was written without seeing the implementation, and check the code against the *spec*
+  rather than against the author's own assumptions — so a hidden mismatch the author's tests missed turns
+  the gate red. Turn it on per project with `oracle_policy` (off by default). New pieces:
+  `clad oracle` (get the spec-only brief), `clad_author_oracle` (record the result), the `SPEC_CONFORMANCE`
+  gate check, and a 34th drift detector.
+- **Spec mistakes are caught the moment you write them.** Creating a feature now rejects a malformed
+  acceptance criterion right away, instead of letting you find out later when the gate fails.
+- **`clad check --json`** — machine-readable gate results with the exact file, line, and suggested fix for
+  each finding (no more squinting at truncated text).
+- **A place to write down *why* a decision was made.** Record the reasoning behind a non-obvious choice in
+  an acceptance criterion's `notes` (`## Decision` / `## Why` / `## Trade-off`), so a future reader doesn't
+  "fix" it the wrong way. Optional — see `docs/ssot-model.md`.
+
+### Changed
+
+- **Less noise, cheaper turns.** The in-session check returns a short summary by default (full detail on
+  request), the spec context is cached between steps, and the heavy gate runs once per feature (at
+  `clad done`) instead of repeatedly.
+- **You rarely need to run `clad sync` by hand anymore** — creating a feature keeps the inventory current,
+  and `check` / `done` validate on their own.
+
+### Fixed
+
+- **No more false "schema.json not found" error.** Every project was hitting a spurious error about a
+  missing internal file; the gate now simply skips it when absent (it was never actually required).
+- **A broken spec file can no longer slip through green.** A malformed spec shard used to pass the gate
+  silently — it now correctly fails.
+
 ## [0.5.0] — 2026-06-01 — No Vacuous Green: honest gates, the per-feature cadence, and an enforced SSoT
 
 **The theme: a gate that passes must mean the work was actually verified.** This release closes a
