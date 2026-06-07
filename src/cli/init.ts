@@ -38,6 +38,14 @@ import {writeAgentsMd, writeClaudeMdSection} from '../init/host-instructions.js'
 import {getCurrentCladdingVersion, getLastSetupVersion} from '../init/host-setup.js';
 import {installPreCommitHook} from '../init/git-hook.js';
 import {loadIntentFromPathIfApplicable} from './intent-from-path.js';
+import {getHostMcpServer} from '../adapters/host/sampling-context.js';
+import {appendEvent, newEvent} from '../events/log.js';
+import {
+  i18nEnabled,
+  i18nModel,
+  normalizeToEnglish,
+  type TranslateFn,
+} from '../optimizer/lang-normalize.js';
 
 export interface InitOptions {
   readonly cwd?: string;
@@ -312,6 +320,40 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
       process.stderr.write(`[clad init] loaded intent from ${resolution.loadedFrom}\n`);
     }
     intent = resolution.intent;
+  }
+
+  // F-60b842 — i18n intent normalization. When a large non-English intent
+  // (e.g. a Korean planning doc loaded above) is about to be sent to the
+  // expensive onboarding model, translate it to English ONCE with a cheap
+  // model so the expensive call reads ~1.8x fewer tokens. SDK mode only:
+  // model selection is honored on direct SDK providers but NOT on host/MCP
+  // sampling, so we skip when a host MCP server is wired (host no-op). The
+  // normalizer never throws — on any failure the original intent is used.
+  if (intent && intent.length > 0 && i18nEnabled() && !getHostMcpServer()) {
+    const translator: TranslateFn | null = selectDispatcher({
+      noLlm: opts.noLlm,
+      model: i18nModel(),
+    });
+    const outcome = await normalizeToEnglish(intent, translator);
+    if (outcome.detectedNonEnglish) {
+      if (outcome.applied) {
+        process.stderr.write(
+          '[clad init] normalized non-English intent → English ' +
+            `(${outcome.charsBefore}→${outcome.charsAfter} chars) via ${i18nModel()}\n`,
+        );
+        intent = outcome.text;
+      }
+      appendEvent(
+        cwd,
+        newEvent('lang_normalized', {
+          applied: outcome.applied,
+          charsBefore: outcome.charsBefore,
+          charsAfter: outcome.charsAfter,
+          model: i18nModel(),
+          ...(outcome.fallbackReason ? {fallbackReason: outcome.fallbackReason} : {}),
+        }),
+      );
+    }
   }
 
   // v0.3.43 — intent-aware onboarding. When the user passes a free-text

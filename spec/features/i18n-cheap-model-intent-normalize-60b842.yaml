@@ -1,0 +1,57 @@
+id: F-60b842
+slug: i18n-cheap-model-intent-normalize
+title: "Cheap-model normalization of large non-English intent to English (SDK-only, dark launch)"
+status: in_progress
+modules:
+  - src/optimizer/lang-normalize.ts
+  - src/cli/init.ts
+  - src/events/log.ts
+acceptance_criteria:
+  - id: AC-212a48
+    ears: state
+    condition: "while i18n normalization is disabled (CLADDING_I18N unset or 'off')"
+    action: "return the original intent text unchanged with applied=false and fallbackReason='disabled'"
+    response: "src/optimizer/lang-normalize.ts normalizeToEnglish() checks enabled() first; when off it returns the original text without calling any translator — zero behavior change for clad init"
+    text: "While i18n normalization is disabled, the system shall return the original intent text unchanged."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-ecdd6d
+    ears: state
+    condition: "while clad init runs in host/MCP mode (getHostMcpServer() returns a server)"
+    action: "skip normalization entirely because the host ignores model selection (no cheap-model routing is possible)"
+    response: "src/cli/init.ts guards the normalization hook with !getHostMcpServer(); in host mode the intent passes through untouched — the feature is SDK-mode only"
+    text: "While clad init runs in host mode, the system shall skip i18n normalization since model routing is not honored."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-f862e1
+    ears: unwanted
+    condition: "if the translation call fails or returns empty output"
+    action: "return the original intent text without throwing, recording fallbackReason"
+    response: "src/optimizer/lang-normalize.ts wraps translate() in try/catch and checks for empty output; any failure yields the original text with applied=false — correctness never depends on translation succeeding"
+    text: "If the translation call fails, then the system shall return the original intent without throwing."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-ca76bd
+    ears: state
+    condition: "while the intent is below the minimum length OR already looks English"
+    action: "skip normalization and return the original text with the matching fallbackReason"
+    response: "src/optimizer/lang-normalize.ts gates on CLADDING_I18N_MIN_CHARS (default 400) and looksNonEnglish(); short or English intents are not worth a translation round-trip and pass through"
+    text: "While the intent is short or already English, the system shall skip normalization."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-427256
+    ears: ubiquitous
+    action: "detect non-English text via non-Latin script ratio and preserve code blocks and identifiers across translation by masking them"
+    response: "src/optimizer/lang-normalize.ts exports looksNonEnglish() (Hangul/CJK/Kana/Cyrillic/Arabic/Hebrew/Thai ranges over a ratio threshold) and maskCode() which replaces fenced/inline code with restorable placeholders so identifiers and code survive the round-trip verbatim"
+    text: "The system shall detect non-English text and preserve code and identifiers across translation."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-da572e
+    ears: event
+    condition: "when normalization is attempted on intent detected as non-English"
+    action: "append a lang_normalized event recording applied, charsBefore, charsAfter, model, and any fallbackReason"
+    response: "src/events/log.ts gains the 'lang_normalized' EventType; src/cli/init.ts emits it after the normalization hook so clad doctor / observability can report realized savings and skip/fallback rate"
+    text: "When normalization is attempted on non-English intent, the system shall append a lang_normalized event."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-f0650a
+    ears: event
+    condition: "when clad init runs in SDK mode with an API key and CLADDING_I18N=on and the loaded intent is large and non-English"
+    action: "route the intent through a cheap model (Haiku) to English before the onboarding dispatch consumes it"
+    response: "src/cli/init.ts builds a translator via selectDispatcher({model: CLADDING_I18N_MODEL default claude-haiku-4-5}) — model override is honored only on SDK providers — and replaces intent with the English result before interpretOnboardingWithFallback; the expensive onboarding model then reads fewer (English) tokens"
+    text: "When clad init runs in SDK mode on large non-English intent, the system shall normalize it to English via a cheap model before onboarding."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]

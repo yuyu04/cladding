@@ -49,7 +49,18 @@ export type EventType =
   //   fallbackReason:    string             // present iff applied === false
   // Disabled / below-min-token runs do NOT emit — they are deliberate no-ops,
   // not compression activity worth recording.
-  | 'compression';
+  | 'compression'
+  // F-60b842 / AC — i18n intent-normalization telemetry. Emitted by clad init
+  // when normalization is attempted on intent detected as non-English (SDK mode
+  // only), so clad doctor / observability can report realized token savings and
+  // skip/fallback rate. Standard payload:
+  //   applied:        boolean   // true iff the English translation was used
+  //   charsBefore:    number    // original intent length
+  //   charsAfter:     number    // translated length (== before on skip/fallback)
+  //   model:          string    // cheap model used for translation
+  //   fallbackReason: string    // present iff applied === false
+  // English / short / disabled / host-mode runs do NOT emit — deliberate no-ops.
+  | 'lang_normalized';
 
 /** One JSONL line in events.log.jsonl. */
 export interface Event {
