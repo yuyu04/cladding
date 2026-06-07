@@ -98,6 +98,52 @@ CLADDING_I18N=on ANTHROPIC_API_KEY=... clad init docs/plan-ko.md
 clad init docs/plan-ko.md      # no normalization, no event
 ```
 
+## English-canonical spec + localized view (F-36f11b)
+
+A stronger, complementary win: cladding's onboarding used to author artifacts in
+the *user's* language (`intent-onboarding.ts` once said "Korean intent → Korean
+title"). Those artifacts — `project-context.md`, capabilities, scenario flows,
+feature titles — are the **canonical spec the model re-reads on every session**.
+In Korean that is ~1.8x the tokens, paid on every read.
+
+So the canonical spec is now authored in **English by default**, with a
+**non-authoritative localized companion view** for humans:
+
+```
+onboarding → English canonical (docs/project-context.md, capabilities, flows)
+                 │  (model reads this — token-lean, every session)
+                 ▼
+        cheap model (Haiku) translates the prose doc
+                 ▼
+docs/project-context.<lang>.md   ← human view, NOT the SSoT, never sent to model
+```
+
+- **`CLADDING_SPEC_LANG`** — canonical authoring language (default `en`). Set
+  `ko` to restore the prior user-language behavior (escape hatch).
+- **`CLADDING_SPEC_VIEW_LANG`** — companion-view language. When unset it is
+  derived from the intent's dominant script (`detectLangHint`); a view equal to
+  the canonical language is skipped.
+- The companion view is generated only in **SDK mode** (model override honored)
+  and is **best-effort** — any failure leaves the English canonical intact and
+  `clad init` continues. It carries a "GENERATED VIEW — NOT THE SSoT" header and
+  is never read by the pruner/dispatch, so it adds **zero per-session token
+  cost** and cannot cause drift.
+
+Precedent: this repo already ships `README.ko.md` — a canonical-English +
+localized-companion pattern.
+
+Why this beats the input-normalization above: the saving is **recurring** (every
+read) and the quality is **higher** (the model authors English directly from the
+understood intent — no lossy round-trip).
+
+| component | role |
+|---|---|
+| `src/cli/scan/spec-lang.ts` | `canonicalLang()`, `viewLang(intent)`, `langDisplayName()` |
+| `src/optimizer/lang-normalize.ts` | `detectLangHint()` — dominant-script → language code |
+| `src/cli/scan/intent-onboarding.ts` | CANONICAL LANGUAGE directive in both onboarding + refinement prompts |
+| `src/cli/init.ts` | companion-view generation after the canonical write |
+| `src/events/log.ts` | `spec_view_generated` telemetry |
+
 ## Caveats / follow-ups (out of scope)
 
 - **No back-translation.** Answers/artifacts stay English by design.

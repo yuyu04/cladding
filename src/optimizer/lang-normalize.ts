@@ -67,6 +67,38 @@ export function looksNonEnglish(text: string, threshold = 0.15): boolean {
   return (matches?.length ?? 0) / nonSpace.length > threshold;
 }
 
+// Per-script probes for coarse language detection. Order matters only for
+// disjoint ranges; each range maps to one BCP-47-ish code.
+const SCRIPT_PROBES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/[가-힣ᄀ-ᇿ㄰-㆏]/u, 'ko'], // Hangul
+  [/[぀-ヿ]/u, 'ja'], // Kana (Hiragana + Katakana)
+  [/[一-鿿㐀-䶿]/u, 'zh'], // CJK ideographs (defaults to zh; ja caught above by kana)
+  [/[Ѐ-ӿ]/u, 'ru'], // Cyrillic
+  [/[؀-ۿ]/u, 'ar'], // Arabic
+  [/[֐-׿]/u, 'he'], // Hebrew
+  [/[฀-๿]/u, 'th'], // Thai
+];
+
+/**
+ * Coarse language hint from the dominant non-Latin script in `text`.
+ * Returns a language code ('ko' | 'ja' | 'zh' | 'ru' | 'ar' | 'he' | 'th')
+ * or 'en' when no non-Latin script dominates. Used to default the
+ * localized-view language when the user hasn't set one explicitly.
+ */
+export function detectLangHint(text: string): string {
+  let best = 'en';
+  let bestCount = 0;
+  for (const [probe, code] of SCRIPT_PROBES) {
+    const re = new RegExp(probe.source, 'gu');
+    const count = text.match(re)?.length ?? 0;
+    if (count > bestCount) {
+      bestCount = count;
+      best = code;
+    }
+  }
+  return best;
+}
+
 /**
  * Replace fenced/inline code spans with restorable placeholders so the
  * translator cannot rewrite code, paths, or identifiers embedded in them.

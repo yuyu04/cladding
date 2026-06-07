@@ -60,7 +60,17 @@ export type EventType =
   //   model:          string    // cheap model used for translation
   //   fallbackReason: string    // present iff applied === false
   // English / short / disabled / host-mode runs do NOT emit — deliberate no-ops.
-  | 'lang_normalized';
+  | 'lang_normalized'
+  // F-36f11b / AC — localized companion-view telemetry. Emitted by clad init
+  // when it generates a non-authoritative human view (docs/project-context.<lang>.md)
+  // from the English canonical via a cheap model. Standard payload:
+  //   viewLang:     string   // companion language code (e.g. 'ko')
+  //   canonicalLang:string   // canonical authoring language (e.g. 'en')
+  //   path:         string   // companion file written
+  //   charsCanonical:number  // size of the canonical body translated
+  //   charsView:    number   // size of the generated view
+  //   ok:           boolean  // false iff generation failed (init still proceeds)
+  | 'spec_view_generated';
 
 /** One JSONL line in events.log.jsonl. */
 export interface Event {

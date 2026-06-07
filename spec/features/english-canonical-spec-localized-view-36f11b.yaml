@@ -1,0 +1,57 @@
+id: F-36f11b
+slug: english-canonical-spec-localized-view
+title: "English-canonical spec authoring + cheap-model localized (.ko) companion view"
+status: in_progress
+modules:
+  - src/cli/scan/spec-lang.ts
+  - src/cli/scan/intent-onboarding.ts
+  - src/optimizer/lang-normalize.ts
+  - src/cli/init.ts
+  - src/events/log.ts
+acceptance_criteria:
+  - id: AC-7afc02
+    ears: ubiquitous
+    action: "author the canonical onboarding artifacts (project-context.md, capabilities titles/summaries, spec seed title, scenario titles/flows) in the canonical language (default English) regardless of the intent language, while keeping clarifying questions in the user's own language"
+    response: "src/cli/scan/intent-onboarding.ts buildPrompt injects a CANONICAL LANGUAGE directive from src/cli/scan/spec-lang.ts canonicalLang() (default 'en'); the per-section 'Match the user's language' instructions are replaced with 'write in <canonical language>'; CLARIFYING_QUESTIONS is the explicit exception so the user still sees questions in their language"
+    text: "The system shall author the canonical spec artifacts in the canonical language (default English) so the repeatedly-read SSoT is token-lean, while clarifying questions stay in the user's language."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
+  - id: AC-24be21
+    ears: state
+    condition: "while CLADDING_SPEC_LANG is set to a non-English code (e.g. 'ko')"
+    action: "author the canonical artifacts in that language instead, preserving the prior behavior as a reversible escape hatch"
+    response: "src/cli/scan/spec-lang.ts canonicalLang() reads CLADDING_SPEC_LANG (default 'en'); langDisplayName() maps the code to a prompt-facing name so the directive generalizes to any language"
+    text: "While CLADDING_SPEC_LANG overrides the canonical language, the system shall author artifacts in that language."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
+  - id: AC-62bffc
+    ears: event
+    condition: "when the view language differs from the canonical language and a cheap translator is available"
+    action: "generate docs/project-context.<viewLang>.md from the canonical English body via the cheap model and append a spec_view_generated event"
+    response: "src/cli/init.ts, after writing docs/project-context.md, computes viewLang() (CLADDING_SPEC_VIEW_LANG or detectLangHint(intent)); when it differs from canonicalLang() and selectDispatcher({model: i18nModel()}) is available it translates the body and writes the companion file, emitting newEvent('spec_view_generated', {...})"
+    text: "When a view language differs from canonical and a translator is available, the system shall generate a localized companion view of project-context.md."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
+  - id: AC-8d18f3
+    ears: ubiquitous
+    action: "mark the generated companion view as non-authoritative with a header and never feed it to the model"
+    response: "src/cli/init.ts prepends a clear 'generated view, not the SSoT' header to docs/project-context.<viewLang>.md; the file is human-only and is not read by pruner/dispatch, so it adds zero per-session token cost and cannot cause drift"
+    text: "The system shall mark the localized companion view as non-authoritative and keep it out of the model-read path."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
+  - id: AC-deec29
+    ears: state
+    condition: "while no cheap translator is available or the view language equals the canonical language"
+    action: "skip companion-view generation entirely"
+    response: "src/cli/init.ts guards generation on a non-null viewLang() and a non-null dispatcher; host/MCP mode (model override not honored) and English-intent projects produce no companion view"
+    text: "While no translator is available or the view equals canonical, the system shall not generate a companion view."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
+  - id: AC-8b5569
+    ears: unwanted
+    condition: "if companion-view generation fails"
+    action: "proceed with init without the view and without throwing"
+    response: "src/cli/init.ts wraps the translate+write in try/catch; any failure leaves the English canonical intact and init continues — the companion view is a best-effort convenience, never a correctness dependency"
+    text: "If companion-view generation fails, then the system shall continue init without the view and without throwing."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
+  - id: AC-56d802
+    ears: ubiquitous
+    action: "map dominant non-Latin script to a language code so the default view language can be derived from the intent"
+    response: "src/optimizer/lang-normalize.ts detectLangHint(text) returns 'ko'|'ja'|'zh'|'ru'|'ar'|'he'|'th' by dominant script range, else 'en'; spec-lang.ts viewLang() uses it when CLADDING_SPEC_VIEW_LANG is unset"
+    text: "The system shall derive a language hint from the intent's dominant script for defaulting the companion view language."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
