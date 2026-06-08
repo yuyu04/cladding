@@ -1,7 +1,7 @@
 id: F-60b842
 slug: i18n-cheap-model-intent-normalize
 title: "Cheap-model normalization of large non-English intent to English (SDK-only, dark launch)"
-status: in_progress
+status: done
 modules:
   - src/optimizer/lang-normalize.ts
   - src/cli/init.ts

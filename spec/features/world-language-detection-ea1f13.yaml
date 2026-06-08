@@ -1,7 +1,7 @@
 id: F-ea1f13
 slug: world-language-detection
 title: "World-language detection for i18n normalization + localized view (beyond non-Latin scripts)"
-status: in_progress
+status: done
 modules:
   - src/optimizer/lang-normalize.ts
   - src/cli/scan/spec-lang.ts

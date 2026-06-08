@@ -1,7 +1,7 @@
 id: F-6aebb9
 slug: headroom-compression-seam
 title: "Headroom context-compression seam (dark launch · serverless subprocess bridge)"
-status: in_progress
+status: done
 modules:
   - src/optimizer/headroom.ts
   - src/optimizer/profiles.ts

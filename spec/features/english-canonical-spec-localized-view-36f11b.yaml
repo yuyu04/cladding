@@ -1,7 +1,7 @@
 id: F-36f11b
 slug: english-canonical-spec-localized-view
 title: "English-canonical spec authoring + cheap-model localized (.ko) companion view"
-status: in_progress
+status: done
 modules:
   - src/cli/scan/spec-lang.ts
   - src/cli/scan/intent-onboarding.ts
