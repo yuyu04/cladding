@@ -144,6 +144,24 @@ understood intent — no lossy round-trip).
 | `src/cli/init.ts` | companion-view generation after the canonical write |
 | `src/events/log.ts` | `spec_view_generated` telemetry |
 
+## World-language coverage (F-ea1f13)
+
+Detection is not Korean-only. `detectLangHint` covers:
+
+- **Non-Latin scripts** (by dominant code-point range): Korean, Japanese,
+  Chinese, Russian/Cyrillic, Arabic, Hebrew, Thai, Devanagari (Hindi), Bengali,
+  Tamil, Telugu, Greek, Georgian, Armenian, Lao, Khmer.
+- **Latin-script languages** (`detectLatinLang`, stopword + diacritic signals,
+  conservative): Spanish, French, German, Portuguese, Italian, Dutch,
+  Vietnamese, Turkish, Indonesian, Polish — English is the default and is never
+  misclassified (a clear margin over English is required).
+- **Anything else**: set `CLADDING_SPEC_LANG` / `CLADDING_SPEC_VIEW_LANG`
+  explicitly — the override is authoritative for *any* language code, so
+  auto-detection only has to handle the common cases.
+
+`looksNonEnglish(text)` is `detectLangHint(text) !== 'en'`, so both intent
+normalization and the localized view trigger for any detected language.
+
 ## Caveats / follow-ups (out of scope)
 
 - **No back-translation.** Answers/artifacts stay English by design.

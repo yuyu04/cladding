@@ -46,57 +46,135 @@ export interface NormalizeOutcome {
   readonly fallbackReason?: NormalizeFallbackReason;
 }
 
-// Letter-bearing non-Latin script ranges: Hangul (jamo + syllables), Kana,
-// CJK, Cyrillic, Arabic, Hebrew, Thai. Enough to catch the languages whose
-// tokenization is materially heavier than English.
-const NON_LATIN_RE =
-  /[ᄀ-ᇿ぀-ヿ㄰-㆏㐀-䶿一-鿿가-힯Ѐ-ӿ؀-ۿ֐-׿฀-๿]/gu;
-
-/**
- * Heuristic: does this text contain enough non-Latin script to be worth
- * translating? Compares non-Latin letters against all non-whitespace chars.
- *
- * @param threshold - non-Latin ratio above which text is "non-English"
- *   (default 0.15 — Korean/Japanese/Chinese prose clears this easily, while
- *   English text with the odd accented name or emoji stays below).
- */
-export function looksNonEnglish(text: string, threshold = 0.15): boolean {
-  const nonSpace = text.replace(/\s/g, '');
-  if (nonSpace.length === 0) return false;
-  const matches = text.match(NON_LATIN_RE);
-  return (matches?.length ?? 0) / nonSpace.length > threshold;
-}
-
-// Per-script probes for coarse language detection. Order matters only for
-// disjoint ranges; each range maps to one BCP-47-ish code.
-const SCRIPT_PROBES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/[가-힣ᄀ-ᇿ㄰-㆏]/u, 'ko'], // Hangul
-  [/[぀-ヿ]/u, 'ja'], // Kana (Hiragana + Katakana)
-  [/[一-鿿㐀-䶿]/u, 'zh'], // CJK ideographs (defaults to zh; ja caught above by kana)
-  [/[Ѐ-ӿ]/u, 'ru'], // Cyrillic
-  [/[؀-ۿ]/u, 'ar'], // Arabic
-  [/[֐-׿]/u, 'he'], // Hebrew
-  [/[฀-๿]/u, 'th'], // Thai
+// Non-Latin script ranges as [startCodePoint, endCodePoint, langCode]. Numeric
+// code points (not regex char-class literals) so the ranges are unambiguous and
+// correct regardless of source-file encoding. The dominant script by count
+// wins. Covers the world's major non-Latin writing systems — also where
+// tokenization is heaviest vs English. (Cyrillic defaults to 'ru'; CJK to 'zh';
+// override with CLADDING_SPEC_VIEW_LANG for uk/bg/sr/ja-kanji-only/etc.)
+const SCRIPT_RANGES: ReadonlyArray<readonly [number, number, string]> = [
+  [0x1100, 0x11ff, 'ko'], [0x3130, 0x318f, 'ko'], [0xac00, 0xd7a3, 'ko'], // Hangul
+  [0x3040, 0x30ff, 'ja'], // Kana (Hiragana + Katakana)
+  [0x3400, 0x4dbf, 'zh'], [0x4e00, 0x9fff, 'zh'], // CJK ideographs
+  [0x0400, 0x04ff, 'ru'], // Cyrillic
+  [0x0600, 0x06ff, 'ar'], [0x0750, 0x077f, 'ar'], // Arabic
+  [0x0590, 0x05ff, 'he'], // Hebrew
+  [0x0e00, 0x0e7f, 'th'], // Thai
+  [0x0900, 0x097f, 'hi'], // Devanagari (Hindi)
+  [0x0980, 0x09ff, 'bn'], // Bengali
+  [0x0b80, 0x0bff, 'ta'], // Tamil
+  [0x0c00, 0x0c7f, 'te'], // Telugu
+  [0x0370, 0x03ff, 'el'], // Greek
+  [0x10a0, 0x10ff, 'ka'], // Georgian
+  [0x0530, 0x058f, 'hy'], // Armenian
+  [0x0e80, 0x0eff, 'lo'], // Lao
+  [0x1780, 0x17ff, 'km'], // Khmer
 ];
 
-/**
- * Coarse language hint from the dominant non-Latin script in `text`.
- * Returns a language code ('ko' | 'ja' | 'zh' | 'ru' | 'ar' | 'he' | 'th')
- * or 'en' when no non-Latin script dominates. Used to default the
- * localized-view language when the user hasn't set one explicitly.
- */
-export function detectLangHint(text: string): string {
+/** Dominant non-Latin script in `text`: its lang code + matched-char count. */
+function scriptHint(text: string): {code: string; count: number} {
+  const counts = new Map<string, number>();
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    for (const [lo, hi, code] of SCRIPT_RANGES) {
+      if (cp >= lo && cp <= hi) {
+        counts.set(code, (counts.get(code) ?? 0) + 1);
+        break;
+      }
+    }
+  }
   let best = 'en';
   let bestCount = 0;
-  for (const [probe, code] of SCRIPT_PROBES) {
-    const re = new RegExp(probe.source, 'gu');
-    const count = text.match(re)?.length ?? 0;
-    if (count > bestCount) {
-      bestCount = count;
+  for (const [code, c] of counts) {
+    if (c > bestCount) {
+      bestCount = c;
       best = code;
     }
   }
-  return best;
+  return {code: best, count: bestCount};
+}
+
+// Distinctive function words for common Latin-script languages. Detection is a
+// best-effort default — explicit CLADDING_SPEC_LANG / CLADDING_SPEC_VIEW_LANG
+// always overrides. A clear margin over English is required so English text is
+// never misclassified (which would trigger a spurious translation).
+const LATIN_STOPWORDS: Readonly<Record<string, readonly string[]>> = {
+  en: ['the', 'and', 'is', 'are', 'to', 'of', 'for', 'with', 'that', 'this', 'you', 'it', 'in', 'on', 'be', 'as', 'at'],
+  es: ['el', 'la', 'los', 'las', 'que', 'por', 'para', 'con', 'una', 'es', 'está', 'como', 'pero', 'también', 'del', 'se'],
+  fr: ['le', 'les', 'des', 'une', 'est', 'pour', 'avec', 'dans', 'que', 'qui', 'pas', 'être', 'sur', 'plus', 'vous', 'nous'],
+  de: ['der', 'die', 'das', 'und', 'ist', 'nicht', 'mit', 'für', 'auch', 'eine', 'sich', 'dem', 'den', 'von', 'werden'],
+  pt: ['os', 'as', 'que', 'para', 'com', 'uma', 'não', 'está', 'como', 'mas', 'também', 'do', 'da', 'se', 'são'],
+  it: ['il', 'di', 'che', 'per', 'con', 'una', 'anche', 'sono', 'non', 'del', 'della', 'gli', 'nel', 'più'],
+  nl: ['het', 'een', 'en', 'van', 'niet', 'dat', 'op', 'voor', 'met', 'zijn', 'aan', 'worden', 'ook'],
+  vi: ['và', 'là', 'của', 'các', 'được', 'cho', 'không', 'một', 'người', 'này', 'với', 'trong', 'để'],
+  tr: ['ve', 'bir', 'bu', 'için', 'ile', 'çok', 'daha', 'olarak', 'olan', 'var', 'değil', 'gibi'],
+  id: ['yang', 'dan', 'untuk', 'dengan', 'adalah', 'ini', 'itu', 'dari', 'pada', 'akan', 'tidak'],
+  pl: ['na', 'do', 'nie', 'że', 'to', 'jest', 'się', 'dla', 'są', 'jako', 'oraz'],
+};
+
+// Diacritics that strongly signal one language (small +2 boost).
+const DIACRITIC_SIGNALS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/[ñ]/u, 'es'], // ñ
+  [/[ß]/u, 'de'], // ß
+  [/[ãõ]/u, 'pt'], // ã õ
+  [/[ışğ]/u, 'tr'], // ı ş ğ
+  [/[đ]/u, 'vi'], // đ
+];
+
+function tokenizeWords(text: string): Set<string> {
+  return new Set(text.toLowerCase().match(/\p{L}+/gu) ?? []);
+}
+
+/**
+ * Best-effort language code for Latin-script text via stopword overlap plus
+ * diacritic signals. Returns 'en' unless another language clearly wins (≥2
+ * distinctive hits and strictly more than English), so English text is never
+ * misclassified into a spurious translation.
+ */
+export function detectLatinLang(text: string): string {
+  const words = tokenizeWords(text);
+  if (words.size === 0) return 'en';
+  const scores: Record<string, number> = {};
+  for (const [code, stops] of Object.entries(LATIN_STOPWORDS)) {
+    let hits = 0;
+    for (const w of stops) if (words.has(w)) hits += 1;
+    scores[code] = hits;
+  }
+  for (const [probe, code] of DIACRITIC_SIGNALS) {
+    if (probe.test(text)) scores[code] = (scores[code] ?? 0) + 2;
+  }
+  const en = scores.en ?? 0;
+  let best = 'en';
+  let bestScore = en;
+  for (const [code, score] of Object.entries(scores)) {
+    if (code !== 'en' && score > bestScore) {
+      bestScore = score;
+      best = code;
+    }
+  }
+  return best !== 'en' && bestScore >= 2 && bestScore > en ? best : 'en';
+}
+
+/**
+ * Coarse language hint for `text`. First the dominant non-Latin script
+ * (Hangul, Kana, CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, Bengali,
+ * Tamil, Telugu, Greek, Georgian, Armenian, Lao, Khmer); when the text is
+ * Latin-script, fall back to {@link detectLatinLang}. Returns 'en' when no
+ * non-English language is found. Used to default the localized-view language.
+ */
+export function detectLangHint(text: string): string {
+  const {code, count} = scriptHint(text);
+  if (count > 0) return code;
+  return detectLatinLang(text);
+}
+
+/**
+ * True when `text` is in any detected non-English language (non-Latin script or
+ * a recognized Latin-script language) — the unified gate for both intent
+ * normalization and the localized companion view.
+ */
+export function looksNonEnglish(text: string): boolean {
+  return detectLangHint(text) !== 'en';
 }
 
 /**

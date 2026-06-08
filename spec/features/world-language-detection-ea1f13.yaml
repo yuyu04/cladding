@@ -1,0 +1,39 @@
+id: F-ea1f13
+slug: world-language-detection
+title: "World-language detection for i18n normalization + localized view (beyond non-Latin scripts)"
+status: in_progress
+modules:
+  - src/optimizer/lang-normalize.ts
+  - src/cli/scan/spec-lang.ts
+acceptance_criteria:
+  - id: AC-69b4df
+    ears: ubiquitous
+    action: "identify the dominant non-Latin script across an expanded set and return its language code"
+    response: "src/optimizer/lang-normalize.ts detectLangHint() probes Hangul(ko), Kana(ja), CJK(zh), Cyrillic(ru), Arabic(ar), Hebrew(he), Thai(th), Devanagari(hi), Bengali(bn), Tamil(ta), Telugu(te), Greek(el), Georgian(ka), Armenian(hy), Lao(lo), Khmer(km) by dominant-script count"
+    text: "The system shall detect the dominant non-Latin script across an expanded set and return its language code."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-eb4376
+    ears: ubiquitous
+    action: "identify common Latin-script world languages from text via stopword and diacritic signals"
+    response: "src/optimizer/lang-normalize.ts detectLatinLang() scores distinct stopword hits per language (es, fr, de, pt, it, nl, vi, tr, id, pl) plus diacritic signals and returns the best language only when it clearly beats English"
+    text: "The system shall detect common Latin-script world languages via stopword and diacritic signals."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-2b3e9a
+    ears: unwanted
+    condition: "if the text is actually English"
+    action: "return 'en' so no spurious translation or companion view is produced"
+    response: "src/optimizer/lang-normalize.ts requires a clear margin over the English stopword score before returning a non-English Latin code; ambiguous or English-dominant text yields 'en', protecting English projects from false positives"
+    text: "If the text is English, then the system shall return 'en' and not misclassify it as another language."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-21970a
+    ears: ubiquitous
+    action: "make looksNonEnglish true exactly when a non-English language is detected, so both input normalization and the localized view trigger for any detected language"
+    response: "src/optimizer/lang-normalize.ts redefines looksNonEnglish(text) as detectLangHint(text) !== 'en', unifying the gate for normalizeToEnglish() and viewLang() across all supported scripts and Latin languages"
+    text: "The system shall trigger normalization and the localized view for any detected non-English language, not only non-Latin scripts."
+    test_refs: ["tests/optimizer/lang-normalize.test.ts"]
+  - id: AC-640986
+    ears: ubiquitous
+    action: "map a broad set of language codes to display names and honor explicit overrides for any language"
+    response: "src/cli/scan/spec-lang.ts langDisplayName() covers ~30 languages; canonicalLang()/viewLang() accept any CLADDING_SPEC_LANG / CLADDING_SPEC_VIEW_LANG code so an explicit override is the authoritative path for any world language even when auto-detection is unsure"
+    text: "The system shall map a broad set of language codes to names and honor explicit overrides for any language."
+    test_refs: ["tests/cli/scan/spec-lang.test.ts"]
