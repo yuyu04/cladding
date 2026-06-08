@@ -99,17 +99,17 @@ function scriptHint(text: string): {code: string; count: number} {
 // always overrides. A clear margin over English is required so English text is
 // never misclassified (which would trigger a spurious translation).
 const LATIN_STOPWORDS: Readonly<Record<string, readonly string[]>> = {
-  en: ['the', 'and', 'is', 'are', 'to', 'of', 'for', 'with', 'that', 'this', 'you', 'it', 'in', 'on', 'be', 'as', 'at'],
-  es: ['el', 'la', 'los', 'las', 'que', 'por', 'para', 'con', 'una', 'es', 'está', 'como', 'pero', 'también', 'del', 'se'],
-  fr: ['le', 'les', 'des', 'une', 'est', 'pour', 'avec', 'dans', 'que', 'qui', 'pas', 'être', 'sur', 'plus', 'vous', 'nous'],
-  de: ['der', 'die', 'das', 'und', 'ist', 'nicht', 'mit', 'für', 'auch', 'eine', 'sich', 'dem', 'den', 'von', 'werden'],
-  pt: ['os', 'as', 'que', 'para', 'com', 'uma', 'não', 'está', 'como', 'mas', 'também', 'do', 'da', 'se', 'são'],
-  it: ['il', 'di', 'che', 'per', 'con', 'una', 'anche', 'sono', 'non', 'del', 'della', 'gli', 'nel', 'più'],
-  nl: ['het', 'een', 'en', 'van', 'niet', 'dat', 'op', 'voor', 'met', 'zijn', 'aan', 'worden', 'ook'],
-  vi: ['và', 'là', 'của', 'các', 'được', 'cho', 'không', 'một', 'người', 'này', 'với', 'trong', 'để'],
-  tr: ['ve', 'bir', 'bu', 'için', 'ile', 'çok', 'daha', 'olarak', 'olan', 'var', 'değil', 'gibi'],
-  id: ['yang', 'dan', 'untuk', 'dengan', 'adalah', 'ini', 'itu', 'dari', 'pada', 'akan', 'tidak'],
-  pl: ['na', 'do', 'nie', 'że', 'to', 'jest', 'się', 'dla', 'są', 'jako', 'oraz'],
+  en: ['the', 'and', 'is', 'are', 'to', 'of', 'for', 'with', 'that', 'this', 'you', 'it', 'be', 'we', 'will', 'can', 'have', 'from'],
+  es: ['el', 'la', 'los', 'las', 'de', 'que', 'por', 'para', 'con', 'una', 'un', 'es', 'está', 'como', 'pero', 'también', 'del', 'se', 'su'],
+  fr: ['je', 'ne', 'vous', 'nous', 'être', 'qui', 'le', 'la', 'les', 'des', 'une', 'un', 'est', 'pour', 'avec', 'dans', 'que', 'sur', 'ce', 'et', 'du', 'aux'],
+  de: ['der', 'die', 'das', 'und', 'ist', 'nicht', 'mit', 'für', 'auch', 'eine', 'ein', 'sich', 'den', 'von', 'werden', 'ich', 'möchte', 'wir', 'aber'],
+  pt: ['o', 'os', 'as', 'de', 'que', 'para', 'com', 'uma', 'um', 'não', 'está', 'como', 'mas', 'também', 'do', 'da', 'se', 'são', 'você', 'eu'],
+  it: ['il', 'lo', 'la', 'di', 'che', 'per', 'con', 'una', 'un', 'anche', 'sono', 'non', 'del', 'della', 'gli', 'nel', 'più', 'questo', 'voglio'],
+  nl: ['het', 'een', 'en', 'van', 'niet', 'dat', 'op', 'voor', 'met', 'zijn', 'aan', 'worden', 'ook', 'ik', 'wil', 'te'],
+  vi: ['và', 'là', 'của', 'các', 'được', 'cho', 'không', 'một', 'người', 'này', 'với', 'trong', 'để', 'tôi', 'xây', 'dựng', 'hệ'],
+  tr: ['ve', 'bir', 'bu', 'için', 'ile', 'çok', 'daha', 'olarak', 'olan', 'var', 'değil', 'gibi', 'istiyorum', 'sistemi'],
+  id: ['yang', 'dan', 'untuk', 'dengan', 'adalah', 'ini', 'itu', 'dari', 'pada', 'akan', 'tidak', 'saya', 'membuat', 'sistem'],
+  pl: ['na', 'do', 'nie', 'że', 'to', 'jest', 'się', 'dla', 'są', 'jako', 'oraz', 'chcę', 'system', 'oraz'],
 };
 
 // Diacritics that strongly signal one language (small +2 boost).
