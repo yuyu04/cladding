@@ -50,6 +50,49 @@
   배포 전 "정말 다 된 건가"를 더 이상 감으로 판단하지 않아도 된다는 뜻이다.
 </p>
 
+## 이 fork — 토큰 최적화 레이어
+
+> cladding **0.6.0** 에 토큰 비용 레이어를 더한 fork입니다. 기존 동작은 그대로 보존되며,
+> 추가 기능은 모두 **가산적이고 기본 off** 입니다.
+
+**0.6.0 대비 무엇이 바뀌었나**
+
+| 추가 | 하는 일 | 기본값 |
+|---|---|---|
+| 영어 canonical spec (i18n) | 모델이 읽는 canonical을 영어로 저작(한국어 대비 ~50% 토큰↓) + 사람용 현지어 companion view | on (`CLADDING_SPEC_LANG=en`) |
+| cheap-model intent relay | 큰 비영어 intent를 onboarding 전에 영어로 1회 정규화 (SDK 모드) | off (`CLADDING_I18N`) |
+| 네이티브 Headroom 압축기 | 순수 TS, in-process — **Python/Rust/프록시/설치 불필요**: `json_dedup`+`log_dedup`(lossy), `json_minify`+`ws_collapse`(lossless). 대량 JSON/로그 도구출력 ~98% | off (`CLADDING_HEADROOM`) |
+| `auto` 압축→복구 | 압축하되, 모델이 생략분이 필요하다고 신호하면 그 턴만 원본으로 재-dispatch | `CLADDING_HEADROOM` 모드 |
+| drive-loop 게이트실패 주입 | 재시도 시 실패한 Type/Lint/Arch 출력을 다음 dispatch에 (압축해) 실어 에이전트가 무엇을 고칠지 알게 함 | 게이트 실패 시 항상 |
+
+실측: canonical 재독 ~50% 상시, 대량 도구/게이트 출력 ~98%, **세션당 통합 ~78%** 절감.
+능력·제품 품질은 stock과 **동률** — 이 추가들은 "더 똑똑하게"가 아니라 **코스트 + 신뢰성**을
+삽니다. [`docs/deep-ab-report.md`](docs/deep-ab-report.md),
+[`docs/headroom-integration.md`](docs/headroom-integration.md) 참고.
+
+**이 fork 설치** (외부 엔진 불필요 — 압축기가 패키지에 내장)
+
+```bash
+npm install -g 'git+https://github.com/yuyu04/cladding.git#feat/headroom-native'
+# 또는: git clone -b feat/headroom-native https://github.com/yuyu04/cladding.git \
+#         && cd cladding && npm i && npm run build && npm link
+```
+
+**켜고 끄기** — 환경변수 (설정 파일은 아직 없음)
+
+```bash
+export CLADDING_HEADROOM=on              # off(기본) | on | simulate | auto
+export CLADDING_HEADROOM_MIN_TOKENS=1500 # (선택) 이보다 작은 payload는 건너뜀
+export CLADDING_SPEC_LANG=en             # canonical 저작 언어 (기본 en)
+export CLADDING_I18N=on                   # 큰 비영어 intent를 영어로 정규화 (SDK 모드)
+```
+
+매번 한정 적용: `CLADDING_HEADROOM=on clad drive`.
+
+> **함정 2가지.** (1) env가 **실제 `clad` 프로세스**에 도달해야 함 — MCP 서버/호스트 플러그인으로
+> 띄우면 *그 프로세스* env에 넣어야지 터미널 export만으론 안 닿음. (2) Headroom 압축과 i18n relay는
+> **SDK 모드**(`ANTHROPIC_API_KEY` 설정)에서만 작동 — host 모드에선 no-op(영어 canonical 저작은 그대로).
+
 ## 호스트 LLM과 어떻게 함께 일하나
 
 cladding은 코드를 쓰지 않는다. 코드를 쓰는 건 언제나 **호스트 LLM**이다. cladding이 맡는 건 LLM이 잘하지 못하는 두 가지 — *시작할 때 의도를 정확히 기억시키는 일*과 *끝났을 때 결과를 기계적으로 검증하는 일*이다.

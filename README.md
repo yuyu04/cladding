@@ -49,6 +49,53 @@
   and no more judging "is this really done?" by gut feel before you ship.
 </p>
 
+<!-- ─────────────── Fork additions ─────────────── -->
+## This fork — token-optimization layer
+
+> A fork of cladding **0.6.0** with a token-cost layer added. Stock behavior is
+> preserved; everything here is **additive and off by default**.
+
+**What changed vs stock 0.6.0**
+
+| Addition | What it does | Default |
+|---|---|---|
+| English-canonical spec (i18n) | Authors the model-read canonical spec in English (~50% fewer tokens than Korean) with a human-only localized companion view | on (`CLADDING_SPEC_LANG=en`) |
+| Cheap-model intent relay | Normalizes large non-English intent → English once before onboarding (SDK mode) | off (`CLADDING_I18N`) |
+| Native Headroom compressor | Pure-TS, in-process compression — **no Python / Rust / proxy / install**: `json_dedup` + `log_dedup` (lossy) and `json_minify` + `ws_collapse` (lossless). ~98% on bulky JSON/log tool output | off (`CLADDING_HEADROOM`) |
+| `auto` compress-then-recover | Compresses, and if the reply signals it needed the dropped data, re-dispatches that turn uncompressed | a `CLADDING_HEADROOM` mode |
+| Drive-loop gate-failure injection | On a retry, feeds the failing Type/Lint/Arch output into the next dispatch (compressed) so the agent knows what to fix | always, on a gate failure |
+
+Measured: ~50% always-on on the canonical re-read, up to ~98% on bulky tool/gate
+output, **~78% integrated per session**. Ability and product quality are at
+**parity** with stock — the additions buy **cost + reliability**, not "smarter"
+output. See [`docs/deep-ab-report.md`](docs/deep-ab-report.md) and
+[`docs/headroom-integration.md`](docs/headroom-integration.md).
+
+**Install this fork** (no external engine — the compressor ships in the package)
+
+```bash
+npm install -g 'git+https://github.com/yuyu04/cladding.git#feat/headroom-native'
+# or: git clone -b feat/headroom-native https://github.com/yuyu04/cladding.git \
+#       && cd cladding && npm i && npm run build && npm link
+```
+
+**Turn it on / off** — environment variables (there is no config file yet)
+
+```bash
+export CLADDING_HEADROOM=on              # off (default) | on | simulate | auto
+export CLADDING_HEADROOM_MIN_TOKENS=1500 # optional: skip payloads smaller than this
+export CLADDING_SPEC_LANG=en             # canonical authoring language (default: en)
+export CLADDING_I18N=on                   # relay large non-English intent → English (SDK mode)
+```
+
+Per-run instead of persistent: `CLADDING_HEADROOM=on clad drive`.
+
+> **Two gotchas.** (1) The env var must reach the **actual `clad` process** — if
+> cladding runs as an MCP server / host plugin, set it in *that* process's env,
+> not just your terminal. (2) Headroom compression and the i18n relay only act in
+> **SDK mode** (`ANTHROPIC_API_KEY` set); in host mode they are no-ops (the
+> English-canonical authoring still applies).
+
 <!-- ─────────────── How it partners with the host LLM ─────────────── -->
 ## How it works with your host LLM
 
