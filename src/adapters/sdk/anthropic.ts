@@ -136,7 +136,27 @@ export class AnthropicTransport implements Transport {
     );
     maybeEmitCompression(ctx.cwd, kind, outcome);
     const system = pickContent(outcome.messages, 'system') ?? persona.body;
-    const userContent = pickContent(outcome.messages, 'user') ?? userMessage;
+    const baseUser = pickContent(outcome.messages, 'user') ?? userMessage;
+
+    // Context blocks (F-6aebb9): bulky tool outputs / logs / file dumps the
+    // caller attached. Each is routed through the seam with its OWN kind, so
+    // the compressor finally has a real payload (json_dedup / log_dedup /
+    // minify) — the shard above is 'spec'-protected. We assemble two user
+    // strings: one with the compressed blocks (sent), one with the originals
+    // (used only if auto-recovery fires). `anyBlockApplied` arms recovery.
+    let anyBlockApplied = false;
+    const compressedBlocks: string[] = [];
+    const originalBlocks: string[] = [];
+    for (const block of ctx.contextBlocks ?? []) {
+      const bout = await compressContext([{role: 'tool', content: block.content}], block.kind);
+      maybeEmitCompression(ctx.cwd, block.kind, bout);
+      anyBlockApplied = anyBlockApplied || bout.applied;
+      const compressed = bout.messages[0]?.content ?? block.content;
+      compressedBlocks.push(`\n\n### ${block.kind} context\n${compressed}`);
+      originalBlocks.push(`\n\n### ${block.kind} context\n${block.content}`);
+    }
+    const userContent = baseUser + compressedBlocks.join('');
+    const userOriginal = baseUser + originalBlocks.join('');
 
     let response = await this.cachedClient.messages.create({
       model: this.model,
@@ -158,7 +178,7 @@ export class AnthropicTransport implements Transport {
     // it collapses. If it was applied AND the reply deterministically signals it
     // needed the omitted data, re-dispatch this ONE turn with the original,
     // uncompressed payload and use that reply instead. Bounded to a single retry.
-    if (shouldRecover(outcome.applied, replyText)) {
+    if (shouldRecover(outcome.applied || anyBlockApplied, replyText)) {
       appendEvent(
         ctx.cwd,
         newEvent('compression', {applied: false, kind, recovered: true, fallbackReason: 'auto_recovered'}),
@@ -167,7 +187,7 @@ export class AnthropicTransport implements Transport {
         model: this.model,
         max_tokens: this.maxTokens,
         system: [{type: 'text', text: persona.body, cache_control: {type: 'ephemeral'}}],
-        messages: [{role: 'user', content: userMessage}],
+        messages: [{role: 'user', content: userOriginal}],
       });
       replyText = extractText(response.content);
     }

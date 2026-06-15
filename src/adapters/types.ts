@@ -57,6 +57,18 @@ export interface AgentContext {
   readonly guardrails: readonly string[];
   /** Working directory the agent should treat as project root. */
   readonly cwd: string;
+  /**
+   * Optional bulky reference material the model should see alongside the shard
+   * — tool outputs (`clad check` JSON), execution logs, file dumps. Each block
+   * is routed through the Headroom seam with its `kind` before dispatch, so the
+   * compressor has a real payload to act on (the shard itself is protected by
+   * the 'spec' profile). Absent ⇒ a plain shard-only dispatch (unchanged).
+   * `kind` mirrors the optimizer's ContextKind union.
+   */
+  readonly contextBlocks?: readonly {
+    readonly kind: 'logs' | 'json' | 'code' | 'spec' | 'history';
+    readonly content: string;
+  }[];
 }
 
 /** What the adapter returns after one persona dispatch. */

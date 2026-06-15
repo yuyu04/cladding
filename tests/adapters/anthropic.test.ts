@@ -120,6 +120,55 @@ describe('AnthropicTransport', () => {
     }
   });
 
+  // A bulky JSON tool-output context block (~150 findings) the loop attaches.
+  const bigJsonBlock = JSON.stringify(
+    {
+      findings: Array.from({length: 150}, (_, i) => ({
+        detector: 'CAPABILITIES_FEATURE_MAPPING',
+        severity: 'info',
+        path: 'spec.yaml',
+        message: `feature ${i} unclaimed`,
+      })),
+    },
+    null,
+    2,
+  );
+  const CTX_WITH_BLOCK: AgentContext = {...CTX, contextBlocks: [{kind: 'json', content: bigJsonBlock}]};
+
+  test('context block is compressed into the dispatched payload (headroom on)', async () => {
+    const saved = process.env.CLADDING_HEADROOM;
+    process.env.CLADDING_HEADROOM = 'on';
+    try {
+      const {client, factory} = makeFakeClient('ok');
+      const t = new AnthropicTransport({apiKey: 'sk-test', clientFactory: factory as never});
+      await t.invoke(PERSONA, CTX_WITH_BLOCK);
+      const sentUser = client.messages.create.mock.calls[0]?.[0].messages[0].content as string;
+      expect(sentUser).toContain('__cladding_compressed__'); // block was deduped
+      expect(sentUser).not.toContain('feature 149 unclaimed'); // omitted entries gone
+      expect(client.messages.create).toHaveBeenCalledOnce(); // reply 'ok' → no recovery
+    } finally {
+      if (saved === undefined) delete process.env.CLADDING_HEADROOM;
+      else process.env.CLADDING_HEADROOM = saved;
+    }
+  });
+
+  test('auto recovery re-dispatches with the ORIGINAL block when the reply signals a gap', async () => {
+    const saved = process.env.CLADDING_HEADROOM;
+    process.env.CLADDING_HEADROOM = 'auto';
+    try {
+      const {client, factory} = makeFakeClient('I can only see 2 of 150 findings; I need the full output.');
+      const t = new AnthropicTransport({apiKey: 'sk-test', clientFactory: factory as never});
+      await t.invoke(PERSONA, CTX_WITH_BLOCK);
+      expect(client.messages.create).toHaveBeenCalledTimes(2); // recovery fired
+      const secondUser = client.messages.create.mock.calls[1]?.[0].messages[0].content as string;
+      expect(secondUser).toContain('feature 149 unclaimed'); // original, uncompressed block re-sent
+      expect(secondUser).not.toContain('__cladding_compressed__');
+    } finally {
+      if (saved === undefined) delete process.env.CLADDING_HEADROOM;
+      else process.env.CLADDING_HEADROOM = saved;
+    }
+  });
+
   test('client is cached across invocations (factory called once)', async () => {
     const factory = vi.fn().mockReturnValue({
       messages: {create: vi.fn().mockResolvedValue({content: [{type: 'text', text: 'ok'}]})},
