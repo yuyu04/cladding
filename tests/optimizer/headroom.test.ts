@@ -2,35 +2,26 @@
 //
 // The seam's load-bearing invariant: compressContext() never throws and falls
 // back to the ORIGINAL messages on every off-path (disabled, below-min-token,
-// open circuit, bridge failure). These tests exercise the gates + fallback
-// without a real Headroom engine — a bogus python path forces a transport
-// error so the passthrough/circuit logic is observable deterministically.
+// no savings). Compression now runs natively in-process (compress-native.ts) —
+// no subprocess, so there is no transport to mock; these tests exercise the
+// gates, the simulate dry-run, and the real native win on a bulky JSON payload.
 
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 
 import {
   approxTokens,
   compressContext,
-  resetCircuitForTesting,
   type OpenAIMessage,
 } from '../../src/optimizer/headroom.js';
 import {PROFILES} from '../../src/optimizer/profiles.js';
 
-const ENV_KEYS = [
-  'CLADDING_HEADROOM',
-  'CLADDING_HEADROOM_PYTHON',
-  'CLADDING_HEADROOM_BRIDGE',
-  'CLADDING_HEADROOM_MIN_TOKENS',
-  'CLADDING_HEADROOM_MAX_FAILS',
-  'CLADDING_HEADROOM_TIMEOUT_MS',
-] as const;
+const ENV_KEYS = ['CLADDING_HEADROOM', 'CLADDING_HEADROOM_MIN_TOKENS'] as const;
 
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
   saved = {};
   for (const k of ENV_KEYS) saved[k] = process.env[k];
-  resetCircuitForTesting();
 });
 
 afterEach(() => {
@@ -38,10 +29,20 @@ afterEach(() => {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
-  resetCircuitForTesting();
 });
 
 const big = (): OpenAIMessage[] => [{role: 'user', content: 'x'.repeat(20_000)}];
+
+/** A bulky JSON tool output — the archetypal compressible payload. */
+const jsonToolPayload = (): OpenAIMessage[] => {
+  const findings = Array.from({length: 120}, (_, i) => ({
+    detector: 'CAPABILITIES_FEATURE_MAPPING',
+    severity: 'info',
+    path: 'spec.yaml',
+    message: `feature F-${i.toString(16).padStart(6, '0')} is not claimed by any capability`,
+  }));
+  return [{role: 'tool', tool_call_id: 't', content: JSON.stringify({findings}, null, 2)}];
+};
 
 describe('compressContext gates', () => {
   test('AC-ac034f: disabled → original messages, applied=false, reason=disabled', async () => {
@@ -56,32 +57,44 @@ describe('compressContext gates', () => {
   test('AC-00ac36: below min tokens → skip with reason below_min_tokens', async () => {
     process.env.CLADDING_HEADROOM = 'on';
     process.env.CLADDING_HEADROOM_MIN_TOKENS = '100000';
-    const out = await compressContext(big(), 'spec');
+    const out = await compressContext(big(), 'json');
     expect(out.applied).toBe(false);
     expect(out.fallbackReason).toBe('below_min_tokens');
   });
 });
 
-describe('compressContext fallback (never throws)', () => {
-  test('AC-b9218d: bridge failure (bad python) → original messages, no throw', async () => {
+describe('compressContext native compression', () => {
+  test('AC-c71d04: bulky JSON tool output is compressed, applied=true, savings>0', async () => {
     process.env.CLADDING_HEADROOM = 'on';
-    process.env.CLADDING_HEADROOM_MIN_TOKENS = '1';
-    process.env.CLADDING_HEADROOM_PYTHON = '/usr/bin/__no_such_python__';
-    const messages = big();
-    const out = await compressContext(messages, 'spec');
-    expect(out.applied).toBe(false);
-    expect(out.messages).toBe(messages);
-    expect(['bridge_error', 'timeout']).toContain(out.fallbackReason);
+    process.env.CLADDING_HEADROOM_MIN_TOKENS = '100';
+    const out = await compressContext(jsonToolPayload(), 'json');
+    expect(out.applied).toBe(true);
+    expect(out.result?.tokensSaved).toBeGreaterThan(0);
+    expect(out.result?.transformsApplied).toContain('native:json_dedup');
   });
 
-  test('AC-8bd17a: circuit opens after max consecutive failures', async () => {
+  test('AC-9f23a1: simulate mode computes savings but does NOT apply', async () => {
+    process.env.CLADDING_HEADROOM = 'simulate';
+    process.env.CLADDING_HEADROOM_MIN_TOKENS = '100';
+    const messages = jsonToolPayload();
+    const out = await compressContext(messages, 'json');
+    expect(out.applied).toBe(false);
+    expect(out.fallbackReason).toBe('simulate');
+    expect(out.result?.tokensSaved).toBeGreaterThan(0); // predicted, not applied
+    expect(out.messages).toBe(messages); // original payload sent
+  });
+
+  test('AC-ca3e88: protected prose (spec profile) → no savings, original returned', async () => {
     process.env.CLADDING_HEADROOM = 'on';
-    process.env.CLADDING_HEADROOM_MIN_TOKENS = '1';
-    process.env.CLADDING_HEADROOM_MAX_FAILS = '3';
-    process.env.CLADDING_HEADROOM_PYTHON = '/usr/bin/__no_such_python__';
-    for (let i = 0; i < 3; i++) await compressContext(big(), 'spec');
-    const fourth = await compressContext(big(), 'spec');
-    expect(fourth.fallbackReason).toBe('circuit_open');
+    process.env.CLADDING_HEADROOM_MIN_TOKENS = '100';
+    const messages: OpenAIMessage[] = [
+      {role: 'system', content: 'persona prompt '.repeat(50)},
+      {role: 'user', content: 'feature shard prose '.repeat(100)},
+    ];
+    const out = await compressContext(messages, 'spec');
+    expect(out.applied).toBe(false);
+    expect(out.fallbackReason).toBe('no_savings');
+    expect(out.messages).toBe(messages);
   });
 });
 
@@ -93,7 +106,6 @@ describe('profiles + helpers', () => {
       expect(typeof p.compress_user_messages).toBe('boolean');
       expect(typeof p.min_tokens_to_compress).toBe('number');
     }
-    // logs is the most aggressive (lowest keep ratio); code/spec are protected.
     expect(PROFILES.code.protect_analysis_context).toBe(true);
     expect(PROFILES.logs.target_ratio).toBeLessThan(0.5);
   });

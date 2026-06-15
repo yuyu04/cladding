@@ -2,50 +2,54 @@
 
 > **Feature:** `F-6aebb9` (`spec/features/headroom-compression-seam-6aebb9.yaml`)
 > **Status:** dark-launch implementation (off by default)
-> **Engine:** [chopratejas/headroom](https://github.com/chopratejas/headroom) — Python library over a Rust core
+> **Engine:** **native** — `src/optimizer/compress-native.ts` (pure TypeScript, ships with cladding)
 > **Host:** Cladding TS harness (Node ≥18, ESM)
 
-This document records *why* and *how* Headroom is embedded into the cladding
-harness. It is the design SSoT (Tier B); the normative contract lives in the
-feature shard above. Code must trace back to that shard's acceptance criteria.
+This document records *why* and *how* context compression is embedded into the
+cladding harness. It is the design SSoT (Tier B); the normative contract lives
+in the feature shard above. Code must trace back to that shard's acceptance
+criteria.
 
 ---
 
 ## 1. The decision that shapes everything
 
-Headroom ships four callable surfaces:
+The compressor runs **natively, in-process, in TypeScript** — it is part of the
+cladding package. There is **no external engine to install, no Python, no Rust
+extension, no proxy, and no daemon**. Install cladding (`npm i`) and the
+compressor is present; flip one env var and it is active.
 
-| Surface | In-process? | Server needed? | Language |
-|---|---|---|---|
-| Python library (`from headroom import compress`) | ✅ yes (Rust core) | ❌ none | Python |
-| TypeScript SDK (`headroom-ai`) | ❌ no — HTTP client | ✅ **proxy or Cloud** | TS |
-| Proxy (`headroom proxy`) | n/a | ✅ long-running daemon | Rust |
-| MCP server | n/a | ✅ server | Python |
+### Why native (and not the external Headroom engine)
 
-Cladding's harness is **TypeScript**. The obvious choice — the TS SDK — is a
-thin HTTP client whose `compress()` *"requires a running Headroom proxy or a
-Cloud API key."* That contradicts the project goal: **embed compression
-in-process, do not stand up a server.**
+An earlier iteration shelled out to the external [chopratejas/headroom](https://github.com/chopratejas/headroom)
+engine (Python library over a Rust core) via a one-shot subprocess bridge. That
+made compression an **out-of-band dependency** the operator had to `pip install`
+separately — and anyone using a cladding fork had to install it too, or
+compression silently stayed off.
 
-The only surface that compresses **with no server** is the **Python library**.
-So the serverless way to use Headroom from a TS harness is a **one-shot Python
-subprocess bridge**: spawn `python3 scripts/headroom_bridge.py`, pipe the
-messages in as JSON, read the compressed messages back out, let the process
-exit. No daemon, no port, no Cloud round-trip.
+The committed A/B against that external engine showed the **realized** token
+savings came **entirely from deterministic structural transforms** on bulky
+machine output — JSON tool arrays and repetitive logs — while the ML prose
+compressor (Kompress) no-op'd on real cladding payloads. So the native engine
+implements exactly those deterministic transforms and nothing that would need a
+model:
+
+| Transform | Target | Behavior |
+|---|---|---|
+| `json_dedup` | large JSON arrays of similar objects (tool outputs) | keep a few exemplars verbatim + one summary marker noting the omitted count and which fields varied |
+| `log_dedup` | repetitive log lines | collapse consecutive runs of pattern-identical lines into the first line + `… (×N more matching)` |
+
+This is **lossy on disposable bulk, lossless on everything protected** — and it
+is deterministic (no clock, no randomness), which fits cladding's Iron Law
+posture (`spec.yaml::project.ai_hints` prefers synchronous + deterministic).
 
 ### Architecture options compared
 
-| Option | Server? | Latency/call | Verdict |
+| Option | Ships with cladding? | External dep | Verdict |
 |---|---|---|---|
-| **A. One-shot Python subprocess → `headroom.compress()`** | ❌ none | ~80–300 ms cold | ✅ **Chosen default** — true in-process Rust pipeline, local-first |
-| B. Managed local proxy child + TS SDK | ⚠️ managed child | ~5–20 ms | Documented escape hatch for high call-volume loops (`transport: proxy`) |
-| C. TS SDK → Headroom Cloud | ❌ remote | network | ❌ Rejected — sends harness context off-box; breaks local-first |
-| D. Reimplement algorithms in TS | ❌ | — | ❌ Rejected — 6 Rust algorithms, unmaintainable drift |
-
-Both A and B sit behind one cladding interface (`compressContext`) so the drive
-loop never knows which transport is live — the same pattern as cladding's
-existing `host` vs `sdk` adapter split. The dark launch ships **Option A only**;
-Option B is a future `transport: proxy` slot.
+| **Native TS compressor (`compress-native.ts`)** | ✅ yes | ❌ none | ✅ **Chosen** — installs with `npm i`, sub-ms, deterministic |
+| External engine via Python subprocess bridge | ❌ no | `pip install headroom-ai` + python3 | ❌ Replaced — out-of-band install, ~80–300 ms cold-start |
+| External engine via managed proxy / Cloud | ❌ no | running daemon or Cloud key | ❌ Rejected — stands up a server / sends context off-box |
 
 ---
 
@@ -55,16 +59,13 @@ Cladding has two dispatch modes (`src/adapters/`):
 
 - **`host`** (default — `claude-code`, `generic-mcp`): the *host* owns the LLM
   wire and the user's subscription. Cladding does **not** make the API call, so
-  there is no outbound payload to intercept. Headroom can only compress the
-  **text cladding assembles** (`featureShard` JSON + `guardrails[]`) before it
-  is handed to the host. Partial reach, but that assembled context is what
-  grows.
+  there is no outbound payload to intercept. The dark launch does not wire the
+  host path.
 - **`sdk`** (`claude-anthropic`, `src/adapters/sdk/anthropic.ts`): cladding owns
   `client.messages.create()`. **Full message-array compression** is possible.
 
-The integration is therefore a **middleware in the adapter layer**, not a proxy
-in front of it. The dark launch wires the seam into the `sdk` adapter (the path
-cladding fully controls); the `host` path is a documented follow-up.
+The integration is a **middleware in the adapter layer**. The dark launch wires
+the seam into the `sdk` adapter (the path cladding fully controls).
 
 ### Component & data flow
 
@@ -78,17 +79,16 @@ drive/loop.ts → drive/agent.ts → selectAdapter()
                 ▼                               ▼
         ┌──────────────────────────────────────────────┐
         │  optimizer/headroom.ts   (the seam)            │
-        │  compressContext(messages, kind, model)        │
-        │  · enabled gate · min-token gate · circuit     │
-        │  · subprocess transport · fallback passthrough │
+        │  compressContext(messages, kind)               │
+        │  · enabled gate · min-token gate · simulate    │
+        │  · native pass · fallback passthrough          │
         └───────────────────────┬──────────────────────┘
                                  ▼
-                  scripts/headroom_bridge.py   (one-shot, stdin→stdout)
+        optimizer/compress-native.ts   (pure, in-process)
+        · profile gating (isEligible)
+        · json_dedup · log_dedup
                                  ▼
-                  Rust _core pipeline (SmartCrusher · Kompress ·
-                  CacheAligner · RollingWindow · Relevance · CCR)
-                                 ▼
-              compressed messages → host / Anthropic API → LLM
+              compressed messages → Anthropic API → LLM
 ```
 
 ### Sequence (SDK mode)
@@ -96,94 +96,82 @@ drive/loop.ts → drive/agent.ts → selectAdapter()
 ```
 loop → agent → AnthropicTransport.invoke(persona, ctx)
   1. build messages[] = [{system: persona.body}, {user: featureShard+guardrails}]
-  2. compressContext(messages, kind, model)
-       2a. disabled?       → passthrough (applied=false)
+  2. compressContext(messages, kind)
+       2a. disabled?         → passthrough (applied=false)
        2b. below min_tokens? → passthrough
-       2c. circuit open?     → passthrough
-       2d. spawn bridge (timeout 5s)
-            success → compressed messages (+ tokensSaved, ccrHashes)
-            error/timeout/parse → passthrough (fallbackReason set)
+       2c. native pass (compressNative)
+            savings>0 + on    → compressed messages
+            savings>0 + simulate → predicted result, ORIGINAL messages sent
+            no savings        → passthrough (no_savings)
+            internal error    → passthrough (compute_error)
   3. emit `compression` event → .cladding/events.log.jsonl
   4. messages.create(returned messages)   # compressed OR original
 ```
 
 **Invariant:** `compressContext` never throws and is pure pass-through on any
-failure. The harness must run identically with Headroom absent — compression is
-strictly an optional optimization, never a correctness dependency.
+failure. The harness runs identically with compression off — it is strictly an
+optional optimization, never a correctness dependency.
 
 ---
 
 ## 3. Per-data-type optimization strategy
 
-Cladding's payload mixes three pressure sources. Each maps to Headroom
-algorithms via a profile (`src/optimizer/profiles.ts`):
+Cladding's payload mixes several pressure sources. Each maps to a posture via a
+profile (`src/optimizer/profiles.ts`), which `compress-native.ts::isEligible()`
+enforces:
 
-| Context kind | Dominant algorithm(s) | Posture | Why |
-|---|---|---|---|
-| **logs** (agent execution logs) | Kompress + RollingWindow | `target_ratio≈0.25`, `protect_recent=2` | Repetitive, low-density; keep the tail + salient lines. |
-| **json** (tool outputs / API responses) | SmartCrusher + ToolCrusher | dedup, `min_tokens_to_compress=250` | Array dedup + change-point preservation collapses near-identical items. |
-| **code** (source context) | RelevanceScorer + `protect_analysis_context` | conservative `0.6`, `compress_user_messages=false` | High-density; protect on analyze/review intent. |
-| **spec** (feature shards + guardrails) | CacheAligner | `compress_system_messages=false`, `0.7` | Keep prefix byte-stable → maximize prompt-cache hits. |
-| **history** (multi-turn) | IntelligentContext | `keepLastTurns≈4`, `0.4` | Drop stale turns, keep error-bearing / referenced ones. |
-
-**Reversibility:** SmartCrusher/CCR emit `ccr_hashes` for crushed blocks. These
-are surfaced in the `CompressResult` so a future confused-turn recovery can
-re-expand a specific block instead of redoing the whole call.
+| Context kind | Posture | Native effect |
+|---|---|---|
+| **logs** (agent execution logs) | `protect_recent=2`, aggressive | `log_dedup` collapses repetitive lines. |
+| **json** (tool outputs / API responses) | dedup, `min_tokens_to_compress=250` | `json_dedup` collapses near-identical array items. |
+| **code** (source context) | `protect_analysis_context`, `compress_user_messages=false` | protected — fenced code passes through. |
+| **spec** (feature shards + guardrails) | `compress_system_messages=false`, `protect_recent=6` | protected — prefix byte-stable → prompt-cache hits. |
+| **history** (multi-turn) | `keep recent`, `compress_user_messages=true` | `json_dedup` on repeated tool records; recent turns protected. |
 
 ---
 
-## 4. Configuration
+## 4. Configuration — turning it on and off
 
-### Environment variables
+The compressor is **off by default** (dark launch). It is controlled entirely by
+environment variables:
 
 ```bash
-CLADDING_HEADROOM=on|off|simulate        # master switch (default: off)
-CLADDING_HEADROOM_TRANSPORT=subprocess   # subprocess (default) | proxy (future)
-CLADDING_HEADROOM_PYTHON=python3         # interpreter for the bridge
-CLADDING_HEADROOM_BRIDGE=scripts/headroom_bridge.py
-CLADDING_HEADROOM_TIMEOUT_MS=5000        # per-call hard cap → fallback on breach
-CLADDING_HEADROOM_MIN_TOKENS=1500        # skip compression below this
-CLADDING_HEADROOM_MAX_FAILS=3            # circuit-breaker trip count
+CLADDING_HEADROOM=off        # default — seam inert, zero behavior change
+CLADDING_HEADROOM=simulate   # dry run: compute & log predicted savings, send ORIGINAL payload
+CLADDING_HEADROOM=on         # active: apply native compression to eligible payloads
+
+CLADDING_HEADROOM_MIN_TOKENS=1500   # skip payloads smaller than this (default 1500)
 ```
 
-### `.cladding/config.yaml` (future, declarative mirror of the env vars)
+That is the whole surface — no interpreter path, no bridge path, no timeout, no
+circuit-breaker knob, because there is no subprocess. To use it:
 
-```yaml
-headroom:
-  enabled: false
-  transport: subprocess
-  timeout_ms: 5000
-  min_tokens: 1500
-  max_consecutive_failures: 3
-  default_profile: spec
-```
+| Goal | Command |
+|---|---|
+| **Off** (default) | unset `CLADDING_HEADROOM`, or `export CLADDING_HEADROOM=off` |
+| **Preview savings** (no risk) | `export CLADDING_HEADROOM=simulate` — the `compression` event logs predicted `tokensSaved`; the original payload is still sent |
+| **On** | `export CLADDING_HEADROOM=on` |
 
-The dark launch reads **env vars only**; the config-file binding is a follow-up
-so the surface stays small until the seam has proven itself.
+Set it in your shell, your CI env, or per-invocation:
+`CLADDING_HEADROOM=on clad <cmd>`.
 
 ---
 
 ## 5. Exception handling & fallback (defense-in-depth)
 
-Five layers, none of which can break the harness:
+Layers, none of which can break the harness:
 
 1. **Structural protection (lossless).** `protect_recent`,
-   `protect_analysis_context`, `min_tokens_to_compress`,
+   `protect_analysis_context`, `min_tokens_to_compress`, and
    `compress_system_messages=false` ensure the active turn, code-under-review,
-   and persona prompt are never touched.
+   and persona prompt are never touched. (AC `ca3e88`.)
 2. **Simulate-guard.** `CLADDING_HEADROOM=simulate` predicts savings with zero
-   lossy risk (no compressed payload is ever sent). Used during rollout.
-3. **Transport fault → passthrough.** Timeout / non-zero exit / malformed JSON /
-   missing python ⇒ the seam returns the **original** messages
-   (`applied=false`, `fallbackReason` set). The LLM call proceeds uncompressed —
-   degraded cost, never broken correctness. (AC `b9218d`.)
-4. **Circuit breaker.** After `max_consecutive_failures` (default 3) the seam
-   disables compression for the rest of the session (`circuit_open`) so a broken
-   python env cannot impose an N× timeout tax. (AC `8bd17a`.)
-5. **Post-hoc confusion recovery (future).** Inspect the LLM reply for confusion
-   signals; on trip, re-dispatch the same turn with `CLADDING_HEADROOM=off`, or
-   re-expand only the referenced crushed block via `ccr_hashes`. Not in the dark
-   launch — documented for the follow-up.
+   lossy risk — no compressed payload is ever sent. (AC `9f23a1`.)
+3. **No-savings → passthrough.** If a pass yields no net reduction, the seam
+   returns the **original** message reference (`no_savings`).
+4. **Internal error → passthrough.** Any error in the native pass is caught and
+   the original messages are returned (`compute_error`). The pass is pure and
+   side-effect-free, so this is a belt-and-suspenders guard. (AC `b9218d`.)
 
 Every attempt (applied, skipped, fallback) is appended to
 `.cladding/events.log.jsonl` as a `compression` event so the `observability`
@@ -193,27 +181,29 @@ persona and `clad doctor` can report realized savings and fallback rate.
 
 ## 6. Rollout & verification
 
-1. **Install engine:** `pip install headroom-ai` on the harness host. The bridge
-   fails-loud → passthrough if absent, so this is non-blocking.
+1. **Nothing to install** — the compressor ships in the cladding package.
 2. **Land dark:** ship with `CLADDING_HEADROOM` unset. The seam is inert.
-3. **Simulate:** set `CLADDING_HEADROOM=simulate` → events log predicted savings
-   with zero lossy risk.
+3. **Simulate:** `CLADDING_HEADROOM=simulate` → events log predicted savings with
+   zero lossy risk.
 4. **Measure:** `clad doctor` / the `observability` persona read the new
-   `compression` events → realized `tokensSaved`, fallback rate, p95 bridge
-   latency.
-5. **Promote:** flip `CLADDING_HEADROOM=on` per-profile once fallback rate is low
-   and savings justify the subprocess cost.
+   `compression` events → realized `tokensSaved`, fallback rate.
+5. **Promote:** flip `CLADDING_HEADROOM=on` once savings justify it.
+6. **Bench any time:** `npx tsx scripts/bench-headroom.ts` regenerates
+   `docs/headroom-ab-report.md` (pure TS — no setup).
 
 ---
 
 ## 7. Known caveats (honest)
 
-- **Subprocess cold-start (~80–300 ms/call)** is the price of "no server." For a
-  chatty drive loop, Option B (managed local proxy child, ~5–20 ms) is the
-  escape hatch — same `compressContext` seam, `transport: proxy`.
-- **Host mode has limited reach** — when Claude Code owns the wire, Headroom only
-  compresses the assembled `featureShard`+`guardrails` text, not the host's full
-  window. The dark launch wires only the `sdk` adapter.
-- The `host` integration, the `proxy` transport, the `.cladding/config.yaml`
-  binding, and post-hoc confusion recovery are deliberately **out of scope** for
-  the dark launch and tracked as follow-ups.
+- **Deterministic transforms only.** The native engine does `json_dedup` and
+  `log_dedup`. It deliberately omits ML-based prose compression — the committed
+  external-engine A/B showed that path contributed ~0 realized savings on real
+  cladding payloads, so dropping it loses nothing while removing a model
+  dependency.
+- **Wins are payload-shaped.** Big reductions land on bulky repetitive machine
+  output (JSON tool arrays, logs). Prose (spec/code/system/user) is protected by
+  design and shows 0% — that is correct, not a miss.
+- **Token counts are a chars/4 proxy** for the gate and the bench (never billed;
+  the compression *ratio* is what matters).
+- **Host mode has limited reach** — when Claude Code owns the wire, the dark
+  launch only wires the `sdk` adapter; the `host` path is a documented follow-up.

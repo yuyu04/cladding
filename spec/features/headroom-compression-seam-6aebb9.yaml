@@ -1,11 +1,12 @@
 id: F-6aebb9
 slug: headroom-compression-seam
-title: "Headroom context-compression seam (dark launch · serverless subprocess bridge)"
+title: "Headroom context-compression seam (dark launch · native in-process compressor)"
 status: done
 modules:
   - src/optimizer/headroom.ts
+  - src/optimizer/compress-native.ts
+  - src/optimizer/compress-types.ts
   - src/optimizer/profiles.ts
-  - scripts/headroom_bridge.py
   - src/adapters/sdk/anthropic.ts
   - src/events/log.ts
 acceptance_criteria:
@@ -13,41 +14,55 @@ acceptance_criteria:
     ears: state
     condition: "while Headroom is disabled (CLADDING_HEADROOM unset or 'off')"
     action: "return the original messages unchanged with applied=false and fallbackReason='disabled'"
-    response: "src/optimizer/headroom.ts compressContext() reads CLADDING_HEADROOM via enabled(); when off it returns {messages, applied:false, fallbackReason:'disabled'} without spawning any subprocess — zero behavior change for the existing dispatch path"
+    response: "src/optimizer/headroom.ts compressContext() reads CLADDING_HEADROOM via enabled(); when off it returns {messages, applied:false, fallbackReason:'disabled'} without running any compression pass — zero behavior change for the existing dispatch path"
     text: "While Headroom is disabled, the system shall return the original messages unchanged so the harness behaves identically to a no-Headroom install."
+    test_refs: ["tests/optimizer/headroom.test.ts"]
+  - id: AC-f408c8
+    ears: ubiquitous
+    action: "perform compression natively in-process with no subprocess, no server, no proxy, and no external engine to install"
+    response: "src/optimizer/compress-native.ts compressNative() is pure TypeScript that ships inside the cladding npm package; it runs in the harness process with zero runtime dependencies, so compression is active wherever cladding is installed (no Python, no Rust extension, no daemon)"
+    text: "The system shall perform compression natively in-process, requiring no external engine, subprocess, server, or proxy."
+    test_refs: ["tests/optimizer/compress-native.test.ts"]
+  - id: AC-c71d04
+    ears: event
+    condition: "when Headroom is on and a payload contains bulky repetitive machine output (a large JSON array or repetitive log lines) above the min-token gate"
+    action: "deterministically dedup it (json_dedup / log_dedup), returning applied=true with tokensSaved>0 and the transform names"
+    response: "src/optimizer/compress-native.ts collapses near-identical JSON-array objects (keeping exemplars + a summary marker) and runs of pattern-identical log lines; compressContext() returns {applied:true, result} with transformsApplied including 'native:json_dedup' or 'native:log_dedup'"
+    text: "When the payload is bulky repetitive machine output, the system shall deterministically compress it and report the realized savings."
+    test_refs: ["tests/optimizer/headroom.test.ts", "tests/optimizer/compress-native.test.ts"]
+  - id: AC-ca3e88
+    ears: state
+    condition: "while a payload is high-value prose protected by its profile (system/user messages, recent turns, or fenced code under the spec/code profiles)"
+    action: "leave it untouched and return the original messages with fallbackReason='no_savings'"
+    response: "src/optimizer/compress-native.ts isEligible() honors compress_system_messages / compress_user_messages / protect_recent / protect_analysis_context; protected payloads yield no savings so compressContext() returns the ORIGINAL message reference — cladding never risks mangling a feature shard or the active ask"
+    text: "While a payload is protected prose, the system shall not compress it and shall return the original messages unchanged."
+    test_refs: ["tests/optimizer/headroom.test.ts", "tests/optimizer/compress-native.test.ts"]
+  - id: AC-9f23a1
+    ears: state
+    condition: "while CLADDING_HEADROOM='simulate'"
+    action: "compute the predicted savings but DO NOT apply them — return the original messages with applied=false and fallbackReason='simulate'"
+    response: "src/optimizer/headroom.ts simulating() gates the apply step; in simulate mode compressContext() runs compressNative() and returns its result (so telemetry logs the predicted tokensSaved) but sends the ORIGINAL payload — a zero-risk dry run for measuring savings before promotion"
+    text: "While Headroom is in simulate mode, the system shall predict savings without applying them."
     test_refs: ["tests/optimizer/headroom.test.ts"]
   - id: AC-b9218d
     ears: unwanted
-    condition: "if the compression bridge fails (subprocess timeout, non-zero exit, malformed stdout, or missing python/headroom)"
-    action: "return the original messages without throwing, recording fallbackReason"
-    response: "src/optimizer/headroom.ts runBridge() rejects on timeout/exit/parse error; compressContext() catches and returns the original messages with applied=false and a fallbackReason string — correctness never depends on compression succeeding"
-    text: "If the compression bridge fails, then the system shall return the original messages without throwing."
-    test_refs: ["tests/optimizer/headroom.test.ts"]
-  - id: AC-8bd17a
-    ears: state
-    condition: "while the per-session consecutive failure count has reached max_consecutive_failures"
-    action: "skip compression for the remainder of the session and return the original messages with fallbackReason='circuit_open'"
-    response: "src/optimizer/headroom.ts tracks consecutiveFailures; once it reaches MAX_FAILURES (env CLADDING_HEADROOM_MAX_FAILS, default 3) compressContext() short-circuits to passthrough — a broken python env cannot impose an N× timeout tax"
-    text: "While the session failure count has reached the limit, the system shall skip compression (circuit open) and pass messages through unchanged."
+    condition: "if the native compression pass encounters any internal error"
+    action: "return the original messages without throwing, recording fallbackReason='compute_error'"
+    response: "src/optimizer/headroom.ts wraps compressNative() in try/catch; any error yields the original messages with applied=false — correctness never depends on compression succeeding, and the native pass itself is pure and side-effect-free"
+    text: "If the native compression pass errors, then the system shall return the original messages without throwing."
     test_refs: ["tests/optimizer/headroom.test.ts"]
   - id: AC-00ac36
     ears: state
     condition: "while the estimated token count of the payload is below the configured minimum"
     action: "skip compression and return the original messages with fallbackReason='below_min_tokens'"
-    response: "src/optimizer/headroom.ts approxTokens() heuristic gates against CLADDING_HEADROOM_MIN_TOKENS (default 1500); small payloads are not worth the subprocess cold-start cost so they pass through untouched"
-    text: "While the payload is below the minimum token threshold, the system shall skip compression to avoid subprocess overhead."
+    response: "src/optimizer/headroom.ts approxTokens() heuristic gates against CLADDING_HEADROOM_MIN_TOKENS (default 1500); small payloads are not worth a compression pass so they pass through untouched"
+    text: "While the payload is below the minimum token threshold, the system shall skip compression."
     test_refs: ["tests/optimizer/headroom.test.ts"]
   - id: AC-0bbaf3
     ears: ubiquitous
-    action: "map each cladding context kind (logs, json, code, spec, history) to a Headroom CompressConfig posture"
-    response: "src/optimizer/profiles.ts exports PROFILES: Record<ContextKind, config> where logs→aggressive target_ratio 0.25, json→SmartCrusher defaults, code→protect_analysis_context with conservative 0.6, spec→0.7 protect, history→0.4 keep-recent; each posture sets compress_user_messages / compress_system_messages / protect_recent / min_tokens_to_compress"
-    text: "The system shall map each context kind to a Headroom compression profile so each data type (logs, JSON, code, spec, history) is compressed appropriately."
-    test_refs: ["tests/optimizer/headroom.test.ts"]
-  - id: AC-f408c8
-    ears: ubiquitous
-    action: "run the Headroom python library in-process via a one-shot stdin to stdout bridge with no long-running server or proxy"
-    response: "scripts/headroom_bridge.py reads {messages, model, config} on stdin, calls headroom.compress() (Rust core, no proxy), writes a camelCased CompressResult on stdout; ImportError or pipeline failure exits non-zero with {error} on stderr so the TS seam falls back to raw"
-    text: "The system shall perform compression through an in-process one-shot subprocess bridge, requiring no running server or proxy."
+    action: "map each cladding context kind (logs, json, code, spec, history) to a compression posture"
+    response: "src/optimizer/profiles.ts exports PROFILES: Record<ContextKind, config> where logs→aggressive target_ratio 0.25, json→dedup defaults, code→protect_analysis_context with conservative 0.6, spec→0.7 protect, history→0.4 keep-recent; each posture sets compress_user_messages / compress_system_messages / protect_recent / min_tokens_to_compress, which compress-native.ts isEligible() enforces"
+    text: "The system shall map each context kind to a compression profile so each data type (logs, JSON, code, spec, history) is compressed appropriately."
     test_refs: ["tests/optimizer/headroom.test.ts"]
   - id: AC-93e942
     ears: event
@@ -60,6 +75,6 @@ acceptance_criteria:
     ears: event
     condition: "when the Anthropic SDK adapter dispatches a persona turn"
     action: "route the assembled system and user payload through compressContext before calling messages.create, then send whichever messages are returned"
-    response: "src/adapters/sdk/anthropic.ts invoke() calls compressContext([system, user], kind, model) between buildUserMessage() and messages.create(); it reads the returned system/user content (compressed or original) so a fallback is transparent to the API call and to drive/loop.ts"
+    response: "src/adapters/sdk/anthropic.ts invoke() calls compressContext([system, user], kind) between buildUserMessage() and messages.create(); it reads the returned system/user content (compressed or original) so a fallback is transparent to the API call and to drive/loop.ts"
     text: "When the Anthropic SDK adapter dispatches, the system shall route its payload through the compression seam before the API call."
     test_refs: ["tests/optimizer/headroom.test.ts"]

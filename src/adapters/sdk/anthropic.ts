@@ -122,7 +122,7 @@ export class AnthropicTransport implements Transport {
 
     // Headroom seam (F-6aebb9). Route the assembled (system + user) payload
     // through the compression engine before the API call. The outcome is
-    // ALWAYS usable — on disabled config or any bridge failure it is the
+    // ALWAYS usable — on disabled config or any internal error it is the
     // original text — so this is transparent to the call below and to the
     // drive loop. 'spec' profile: keep the persona prefix stable for cache
     // hits, protect the active ask.
@@ -133,7 +133,6 @@ export class AnthropicTransport implements Transport {
         {role: 'user', content: userMessage},
       ],
       kind,
-      this.model,
     );
     maybeEmitCompression(ctx.cwd, kind, outcome);
     const system = pickContent(outcome.messages, 'system') ?? persona.body;
