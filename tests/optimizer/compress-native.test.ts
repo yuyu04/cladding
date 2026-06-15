@@ -1,8 +1,9 @@
 // Cladding · unit tests for optimizer/compress-native.ts (F-6aebb9)
 //
-// The native, in-process compressor: deterministic structural transforms
-// (JSON array dedup, repetitive log dedup) with profile-driven protection of
-// high-value prose. Pure function — no env, no subprocess, no clock.
+// The native, in-process compressor: deterministic LOSSY structural transforms
+// (json_dedup, log_dedup, profile-gated) plus a LOSSLESS tier (json_minify,
+// ws_collapse) that may apply even to protected content. Pure — no env, no
+// subprocess, no clock.
 
 import {describe, expect, test} from 'vitest';
 
@@ -38,11 +39,11 @@ describe('json_dedup', () => {
     expect(r.messages[0].content).toContain('__cladding_compressed__');
   });
 
-  test('small arrays are left alone (no gain)', () => {
+  test('small arrays are not deduped (lossy tier skips; lossless minify may still apply)', () => {
     const msgs: OpenAIMessage[] = [{role: 'tool', content: jsonFindings(3)}];
     const r = compressNative(msgs, {...PROFILES.json, min_tokens_to_compress: 1});
-    expect(r.compressed).toBe(false);
-    expect(r.messages).toBe(msgs); // original reference
+    expect(r.transformsApplied).not.toContain('native:json_dedup');
+    expect(r.messages[0].content).not.toContain('__cladding_compressed__');
   });
 });
 
@@ -78,6 +79,65 @@ describe('profile protection', () => {
       min_tokens_to_compress: 1,
     });
     expect(r.compressed).toBe(false);
+  });
+});
+
+describe('lossless tier (json_minify + ws_collapse)', () => {
+  // One big nested object (NOT an array of >=8 objects), so json_dedup skips it
+  // and json_minify is isolated. A 30-tenant map makes it sizable.
+  const prettyConfig = (): string =>
+    JSON.stringify(
+      {
+        service: 'billing',
+        limits: {rpm: 600, burst: 50, regions: ['us', 'eu', 'ap']},
+        flags: {dunning: true, multiCurrency: true, idempotency: 'strict'},
+        retries: {schedule: [1, 3, 7], unit: 'day'},
+        tenants: Object.fromEntries(
+          Array.from({length: 30}, (_, i) => [
+            `tenant_${i}`,
+            {plan: 'pro', currency: 'USD', active: true},
+          ]),
+        ),
+      },
+      null,
+      2,
+    );
+
+  test('json_minify losslessly shrinks pretty JSON (single object → dedup skips it)', () => {
+    const before = prettyConfig();
+    const msgs: OpenAIMessage[] = [{role: 'tool', content: before}];
+    const r = compressNative(msgs, {...PROFILES.json, min_tokens_to_compress: 1});
+    expect(r.compressed).toBe(true);
+    expect(r.transformsApplied).toContain('native:json_minify');
+    expect(r.messages[0].content).not.toContain('\n  '); // pretty indentation gone
+    // lossless: the minified output parses back to the identical object
+    expect(JSON.parse(r.messages[0].content)).toEqual(JSON.parse(before));
+  });
+
+  test('ws_collapse folds 3+ blank lines to one (lossless)', () => {
+    // spec profile → lossy tier is skipped (user protected), isolating ws_collapse.
+    const before = ('paragraph number ' + 'X'.repeat(8) + '\n\n\n\n').repeat(60);
+    const msgs: OpenAIMessage[] = [{role: 'user', content: before}];
+    const r = compressNative(msgs, {...PROFILES.spec, min_tokens_to_compress: 1});
+    expect(r.transformsApplied).toContain('native:ws_collapse');
+    expect(r.transformsApplied).not.toContain('native:log_dedup'); // lossy skipped
+    expect(r.messages[0].content).not.toMatch(/\n[ \t]*\n[ \t]*\n/); // no 3-in-a-row blanks
+  });
+
+  test('lossless applies even to lossy-protected content (spec profile, JSON user msg)', () => {
+    const msgs: OpenAIMessage[] = [{role: 'user', content: prettyConfig()}];
+    const r = compressNative(msgs, {...PROFILES.spec, min_tokens_to_compress: 1});
+    // spec protects the user message from the LOSSY tier, but lossless still minifies
+    expect(r.compressed).toBe(true);
+    expect(r.transformsApplied).toContain('native:json_minify');
+  });
+
+  test('system messages are never touched (cache-prefix byte stability)', () => {
+    const sys = 'You are the persona.\n\n\n\n\nGuidance follows.\n\n\n\nMore.'.repeat(40);
+    const msgs: OpenAIMessage[] = [{role: 'system', content: sys}];
+    const r = compressNative(msgs, {...PROFILES.json, min_tokens_to_compress: 1});
+    expect(r.compressed).toBe(false);
+    expect(r.messages[0].content).toBe(sys); // byte-identical
   });
 });
 

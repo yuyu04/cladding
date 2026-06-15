@@ -8,25 +8,25 @@
 
 | kind | payload | tokens A (before) | tokens B (after) | saved | reduction | transforms |
 |---|---|---|---|---|---|---|
-| json | detector-findings JSON (~150 records) | 10608 | 217 | 10391 | 98% | native:json_dedup, native:protected |
+| json | detector-findings JSON (~150 records) | 10608 | 190 | 10418 | 98.2% | native:json_dedup, native:json_minify, native:protected |
 | spec | real feature shard + guardrails | 3148 | 3148 | 0 | 0% | native:protected |
-| code | real source module (init.ts) | 9652 | 9652 | 0 | 0% | native:protected |
+| code | real source module (init.ts) | 9652 | 9651 | 1 | 0% | native:protected, native:ws_collapse |
 | logs | agent execution log (400 lines) | 11458 | 51 | 11407 | 99.6% | native:log_dedup, native:protected |
-| history | multi-turn w/ repeated tool output | 1149 | 157 | 992 | 86.3% | native:json_dedup, native:protected |
+| history | multi-turn w/ repeated tool output | 1149 | 127 | 1022 | 88.9% | native:json_dedup, native:json_minify, native:protected |
 
-- **Aggregate:** 36015 → 13225 tokens (**63.3% fewer**, 22790 saved).
-- **Illustrative input cost** @ $3/1M tok (Sonnet 4.6): $0.10805 → $0.03968 per these payloads.
+- **Aggregate:** 36015 → 13167 tokens (**63.4% fewer**, 22848 saved).
+- **Illustrative input cost** @ $3/1M tok (Sonnet 4.6): $0.10805 → $0.03950 per these payloads.
 - Compression runs locally and deterministically, so it adds **no API cost** — only the negligible CPU latency below.
 
 ## 2. Performance — per-call latency
 
 | kind | group A | group B (p50) | B range | result |
 |---|---|---|---|---|
-| json | A: ~0 ms (inert) | B: 0.19 ms | 0.15–0.52 ms | compressed |
-| spec | A: ~0 ms (inert) | B: 0.01 ms | 0–0.1 ms | passthrough (no_savings) |
-| code | A: ~0 ms (inert) | B: 0 ms | 0–0.06 ms | passthrough (no_savings) |
-| logs | A: ~0 ms (inert) | B: 0.31 ms | 0.28–0.59 ms | compressed |
-| history | A: ~0 ms (inert) | B: 0.08 ms | 0.08–0.14 ms | compressed |
+| json | A: ~0 ms (inert) | B: 0.29 ms | 0.16–0.57 ms | compressed |
+| spec | A: ~0 ms (inert) | B: 0.02 ms | 0.02–0.1 ms | passthrough (no_savings) |
+| code | A: ~0 ms (inert) | B: 0.05 ms | 0.05–0.12 ms | compressed |
+| logs | A: ~0 ms (inert) | B: 0.31 ms | 0.29–0.63 ms | compressed |
+| history | A: ~0 ms (inert) | B: 0.08 ms | 0.08–0.15 ms | compressed |
 
 - Group A is inert (the seam returns before any work) — **0 ms, 0 risk** when disabled.
 - Group B runs a pure in-process pass (no subprocess cold-start). Net trade: **sub-millisecond CPU now, fewer prompt tokens (and faster model TTFT) later.**
@@ -37,8 +37,8 @@
 |---|---|---|---|
 | ✅ | A: CLADDING_HEADROOM=off | passthrough, applied=false, no throw | `applied=false reason=disabled` |
 | ✅ | B: malformed (non-JSON) payload | no throw, original returned (no_savings) | `applied=false reason=no_savings same-ref=true` |
-| ✅ | B: CLADDING_HEADROOM=simulate | predicts savings, applied=false (dry run) | `applied=false reason=simulate predictedSaved=10391` |
-| ✅ | B: determinism | identical tokensAfter across runs | `after=217 vs 217` |
+| ✅ | B: CLADDING_HEADROOM=simulate | predicts savings, applied=false (dry run) | `applied=false reason=simulate predictedSaved=10418` |
+| ✅ | B: determinism | identical tokensAfter across runs | `after=190 vs 190` |
 | ✅ | B: structural validity | output is non-empty, roles preserved | `msgs=3 roles=user/assistant/tool` |
 | ✅ | B: spec prose protection | high-value prose not compressed | `applied=false reason=no_savings` |
 

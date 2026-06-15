@@ -39,9 +39,25 @@ model:
 | `json_dedup` | large JSON arrays of similar objects (tool outputs) | keep a few exemplars verbatim + one summary marker noting the omitted count and which fields varied |
 | `log_dedup` | repetitive log lines | collapse consecutive runs of pattern-identical lines into the first line + `… (×N more matching)` |
 
-This is **lossy on disposable bulk, lossless on everything protected** — and it
-is deterministic (no clock, no randomness), which fits cladding's Iron Law
-posture (`spec.yaml::project.ai_hints` prefers synchronous + deterministic).
+On top of the lossy tier there is a **lossless tier** that preserves meaning, so
+it may run even on content the lossy tier protects (broadening coverage at ~zero
+risk) — the one exception is `system` messages, kept byte-identical so the
+prompt-cache prefix stays stable:
+
+| Transform (lossless) | Target | Behavior |
+|---|---|---|
+| `json_minify` | any JSON document | strip pretty-print whitespace (`JSON.parse` round-trips to the identical object) |
+| `ws_collapse` | any text | fold runs of 3+ blank lines to a single blank line |
+
+> Note on limits: you cannot losslessly shrink dense prose below its information
+> content, and you cannot byte-compress (gzip) a prompt — the model reads tokens,
+> and compressed bytes tokenize *worse*. So the lossless tier's real wins are on
+> JSON (minify) and verbose formatting; natural prose stays ~unchanged. The
+> profile-gated lossy tier remains where the large structural savings come from.
+
+All transforms are deterministic (no clock, no randomness, no model), which fits
+cladding's Iron Law posture (`spec.yaml::project.ai_hints` prefers synchronous +
+deterministic).
 
 ### Architecture options compared
 
@@ -221,14 +237,16 @@ persona and `clad doctor` can report realized savings and fallback rate.
 
 ## 7. Known caveats (honest)
 
-- **Deterministic transforms only.** The native engine does `json_dedup` and
-  `log_dedup`. It deliberately omits ML-based prose compression — the committed
-  external-engine A/B showed that path contributed ~0 realized savings on real
-  cladding payloads, so dropping it loses nothing while removing a model
-  dependency.
+- **Deterministic transforms only.** The native engine does `json_dedup`,
+  `log_dedup` (lossy) and `json_minify`, `ws_collapse` (lossless). It
+  deliberately omits ML-based prose compression — the committed external-engine
+  A/B showed that path contributed ~0 realized savings on real cladding
+  payloads, so dropping it loses nothing while removing a model dependency.
 - **Wins are payload-shaped.** Big reductions land on bulky repetitive machine
-  output (JSON tool arrays, logs). Prose (spec/code/system/user) is protected by
-  design and shows 0% — that is correct, not a miss.
+  output (JSON tool arrays, logs). The lossless tier squeezes a little more out
+  of any JSON/verbose text safely. Dense natural prose stays ~unchanged — not a
+  miss, but the information-theory limit (you cannot losslessly shrink meaning,
+  and the model can't read gzipped bytes).
 - **Token counts are a chars/4 proxy** for the gate and the bench (never billed;
   the compression *ratio* is what matters).
 - **Host mode has limited reach** — when Claude Code owns the wire, the dark

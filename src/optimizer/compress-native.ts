@@ -206,9 +206,53 @@ function logDedup(content: string): {text: string; applied: boolean} {
   return {text: out.join('\n'), applied: true};
 }
 
+// --- Lossless tier (json_minify · ws_collapse) ---------------------------
+//
+// Meaning-preserving transforms. Because they never change semantics, they may
+// apply EVEN to content the lossy tier protects (spec/code/recent), broadening
+// coverage at ~zero risk. The one exception is `system` messages, which the
+// caller excludes to keep the cached persona prefix byte-stable.
+
+/** Re-serialize a JSON document without pretty-print whitespace. Lossless. */
+function jsonMinify(content: string): {text: string; applied: boolean} {
+  const trimmed = content.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return {text: content, applied: false};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return {text: content, applied: false};
+  }
+  const min = JSON.stringify(parsed);
+  return min.length < content.length ? {text: min, applied: true} : {text: content, applied: false};
+}
+
+/** Collapse runs of 3+ consecutive blank lines to a single blank line. Lossless. */
+function collapseBlankLines(content: string): {text: string; applied: boolean} {
+  const out = content.replace(/(\r?\n[ \t]*){3,}/g, '\n\n');
+  return out.length < content.length ? {text: out, applied: true} : {text: content, applied: false};
+}
+
+/** Run the lossless tier; returns the transformed text + the transforms used. */
+function losslessNormalize(content: string): {content: string; transforms: string[]} {
+  let text = content;
+  const transforms: string[] = [];
+  const j = jsonMinify(text);
+  if (j.applied) {
+    text = j.text;
+    transforms.push('native:json_minify');
+  }
+  const w = collapseBlankLines(text);
+  if (w.applied) {
+    text = w.text;
+    transforms.push('native:ws_collapse');
+  }
+  return {content: text, transforms};
+}
+
 // --- Per-message dispatch ------------------------------------------------
 
-/** Apply the best-fitting transform to one message's content. */
+/** Apply the best-fitting LOSSY transform to one message's content. */
 function compressContent(content: string): {content: string; transform: string | null} {
   const j = jsonDedup(content);
   if (j.applied && approx(j.text) < approx(content)) {
@@ -239,17 +283,33 @@ export function compressNative(
   let changed = false;
 
   const out = messages.map((m, i) => {
-    if (!isEligible(m, i, messages.length, cfg)) {
-      transforms.add('native:protected');
-      return m;
+    let content = m.content;
+
+    // Lossy tier — profile-gated (protects system/user/recent/code per profile).
+    if (isEligible(m, i, messages.length, cfg)) {
+      const r = compressContent(content);
+      if (r.transform) {
+        content = r.content;
+        transforms.add(r.transform);
+      }
     }
-    const {content, transform} = compressContent(m.content);
-    if (transform) {
-      transforms.add(transform);
+
+    // Lossless tier — meaning-preserving, so it may run even on protected
+    // content. Excluded for `system` messages to keep the cached persona prefix
+    // byte-stable (a changed prefix would cost a cache miss > the tokens saved).
+    if (m.role !== 'system') {
+      const lossless = losslessNormalize(content);
+      if (lossless.transforms.length > 0) {
+        content = lossless.content;
+        for (const tr of lossless.transforms) transforms.add(tr);
+      }
+    }
+
+    if (content !== m.content) {
       changed = true;
       return {...m, content};
     }
-    transforms.add('native:no_gain');
+    transforms.add('native:protected');
     return m;
   });
 

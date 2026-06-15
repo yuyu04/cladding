@@ -33,10 +33,16 @@ acceptance_criteria:
   - id: AC-ca3e88
     ears: state
     condition: "while a payload is high-value prose protected by its profile (system/user messages, recent turns, or fenced code under the spec/code profiles)"
-    action: "leave it untouched and return the original messages with fallbackReason='no_savings'"
-    response: "src/optimizer/compress-native.ts isEligible() honors compress_system_messages / compress_user_messages / protect_recent / protect_analysis_context; protected payloads yield no savings so compressContext() returns the ORIGINAL message reference — cladding never risks mangling a feature shard or the active ask"
-    text: "While a payload is protected prose, the system shall not compress it and shall return the original messages unchanged."
+    action: "leave it untouched by the LOSSY tier and return the original messages with fallbackReason='no_savings' when no lossless gain exists"
+    response: "src/optimizer/compress-native.ts isEligible() honors compress_system_messages / compress_user_messages / protect_recent / protect_analysis_context; the lossy tier (json_dedup/log_dedup) never runs on protected payloads, so a feature shard, source file under review, or the active ask is never mangled — pure prose yields no savings and returns the ORIGINAL message reference"
+    text: "While a payload is protected prose, the system shall not apply the lossy tier to it."
     test_refs: ["tests/optimizer/headroom.test.ts", "tests/optimizer/compress-native.test.ts"]
+  - id: AC-7e2c91
+    ears: ubiquitous
+    action: "additionally apply a LOSSLESS tier (json_minify: strip JSON pretty-print whitespace; ws_collapse: fold 3+ blank lines to one) that preserves meaning, so it may run even on content the lossy tier protects — EXCEPT system messages, which stay byte-identical to keep the cached persona prefix stable"
+    response: "src/optimizer/compress-native.ts losslessNormalize() runs json_minify + collapseBlankLines on every non-system message after the lossy tier; both are semantics-preserving (JSON.parse round-trips equal; blank-line count beyond one is non-semantic), so they broaden coverage at ~zero risk; the system message is skipped so its bytes (and the prompt-cache key) never change"
+    text: "The system shall apply meaning-preserving lossless transforms to non-system messages, even when the lossy tier protects them."
+    test_refs: ["tests/optimizer/compress-native.test.ts"]
   - id: AC-9f23a1
     ears: state
     condition: "while CLADDING_HEADROOM='simulate'"
