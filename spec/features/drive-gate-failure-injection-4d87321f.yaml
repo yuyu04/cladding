@@ -1,0 +1,23 @@
+id: F-4d87321f
+slug: drive-gate-failure-injection
+title: "Drive loop injects failed-gate output into the next dispatch (context-injection)"
+status: done
+depends_on:
+  - F-6aebb9
+modules:
+  - src/drive/loop.ts
+acceptance_criteria:
+  - id: AC-bd0629
+    ears: event
+    condition: "when an L1 gate (Type/Lint/Arch) fails and the feature is retried"
+    action: "capture the failing gate's stderr and attach it to the next dispatch as a contextBlock of kind 'logs' so the developer persona knows what to fix"
+    response: "src/drive/loop.ts records failed[1].stderr into lastFailedGateOutput per feature; on the retry iteration ctxFor() builds a {kind:'logs', content} contextBlock from it — routed through the Headroom seam (F-6aebb9) so a bulky/repetitive error dump is compressed before dispatch, while a small one passes through. This is the context-injection the loop header long noted as a follow-up; previously the retry re-dispatched blind."
+    text: "When a gate fails and the feature retries, the system shall inject the failing gate output into the next dispatch as a context block."
+    test_refs: ["tests/drive/loop.test.ts"]
+  - id: AC-30df10
+    ears: state
+    condition: "while a feature is on its first attempt (no prior gate failure recorded)"
+    action: "dispatch with no contextBlocks — a plain shard-only payload, unchanged from before"
+    response: "src/drive/loop.ts ctxFor() returns contextBlocks only when a prior failure exists for the feature; the first dispatch omits the field entirely so behavior is identical to a no-injection run"
+    text: "While a feature is on its first attempt, the system shall dispatch without any injected context blocks."
+    test_refs: ["tests/drive/loop.test.ts"]

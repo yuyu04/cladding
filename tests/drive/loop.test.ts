@@ -214,6 +214,26 @@ describe('runDriveLoop', () => {
     expect(runAgentMock).not.toHaveBeenCalled();
   });
 
+  test('retry after a gate failure injects the failing output into the next dispatch (F-6aebb9)', async () => {
+    loadSpecMock.mockReturnValue(specOf([{id: 'F-x', status: 'pending'}]));
+    const TYPE_FAIL = {
+      pass: false,
+      exitCode: 1,
+      stage: 'stage_1.1',
+      stderr: 'src/x.ts(3,7): error TS2322: Type string is not assignable to number.\n'.repeat(40),
+    };
+    runTypeMock.mockReturnValueOnce(TYPE_FAIL); // first attempt fails; default PASS afterwards
+    await runDriveLoop({cwd: dir, skipHealthCheck: true});
+
+    // call 0 = first developer dispatch (blind, no block);
+    // call 1 = retry developer dispatch (carries the failing gate output).
+    expect(runAgentMock.mock.calls[0]?.[1].contextBlocks).toBeUndefined();
+    const retryCtx = runAgentMock.mock.calls[1]?.[1];
+    expect(retryCtx.contextBlocks).toBeDefined();
+    expect(retryCtx.contextBlocks[0].kind).toBe('logs');
+    expect(retryCtx.contextBlocks[0].content).toContain('TS2322');
+  });
+
   test('feature with unresolved depends_on → BLOCKED_FEATURE', async () => {
     loadSpecMock.mockReturnValueOnce(
       specOf([{id: 'F-002', status: 'planned', depends_on: ['F-999']}]),
