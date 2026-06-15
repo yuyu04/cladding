@@ -44,6 +44,20 @@ acceptance_criteria:
     response: "src/optimizer/headroom.ts simulating() gates the apply step; in simulate mode compressContext() runs compressNative() and returns its result (so telemetry logs the predicted tokensSaved) but sends the ORIGINAL payload — a zero-risk dry run for measuring savings before promotion"
     text: "While Headroom is in simulate mode, the system shall predict savings without applying them."
     test_refs: ["tests/optimizer/headroom.test.ts"]
+  - id: AC-a17c3e
+    ears: state
+    condition: "while CLADDING_HEADROOM='auto'"
+    action: "apply compression like 'on', then let the dispatch adapter detect (deterministically, no LLM) whether the model reply signals it needed the omitted data"
+    response: "src/optimizer/headroom.ts headroomMode() recognizes 'auto' (enabled like 'on'); needsFullContext(reply) is a pure regex over insufficiency signals (EN+KO, plus the compressor's own markers); shouldRecover(applied, reply) is true only when mode is auto AND compression was applied AND the reply signals a gap"
+    text: "While Headroom is in auto mode, the system shall apply compression and deterministically detect whether the reply signals missing context."
+    test_refs: ["tests/optimizer/headroom.test.ts"]
+  - id: AC-d4f5b2
+    ears: event
+    condition: "when auto mode applied compression and the reply signals it needed the omitted data"
+    action: "re-dispatch that one turn with the ORIGINAL uncompressed payload (bounded to a single retry) and use that reply, emitting a recovery compression event"
+    response: "src/adapters/sdk/anthropic.ts invoke() calls shouldRecover(outcome.applied, replyText); on true it appends a 'compression' event {recovered:true, fallbackReason:'auto_recovered'} and re-calls messages.create with the original persona.body + userMessage, replacing the reply — lossy compression becomes self-correcting at the cost of one retry"
+    text: "When auto mode's compressed reply signals missing context, the system shall re-dispatch once with the original payload."
+    test_refs: ["tests/adapters/anthropic.test.ts", "tests/optimizer/headroom.test.ts"]
   - id: AC-b9218d
     ears: unwanted
     condition: "if the native compression pass encounters any internal error"

@@ -11,6 +11,9 @@ import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {
   approxTokens,
   compressContext,
+  headroomMode,
+  needsFullContext,
+  shouldRecover,
   type OpenAIMessage,
 } from '../../src/optimizer/headroom.js';
 import {PROFILES} from '../../src/optimizer/profiles.js';
@@ -112,5 +115,43 @@ describe('profiles + helpers', () => {
 
   test('approxTokens ~ chars/4', () => {
     expect(approxTokens([{role: 'user', content: 'abcd'.repeat(100)}])).toBe(100);
+  });
+});
+
+describe('auto mode + recovery (F-6aebb9)', () => {
+  test('headroomMode parses off/on/simulate/auto; unknown → off', () => {
+    process.env.CLADDING_HEADROOM = 'auto';
+    expect(headroomMode()).toBe('auto');
+    process.env.CLADDING_HEADROOM = 'bananas';
+    expect(headroomMode()).toBe('off');
+    delete process.env.CLADDING_HEADROOM;
+    expect(headroomMode()).toBe('off');
+  });
+
+  test('auto mode applies compression (like on) on a compressible payload', async () => {
+    process.env.CLADDING_HEADROOM = 'auto';
+    process.env.CLADDING_HEADROOM_MIN_TOKENS = '100';
+    const out = await compressContext(jsonToolPayload(), 'json');
+    expect(out.applied).toBe(true);
+  });
+
+  test('needsFullContext detects insufficiency signals (EN + KO)', () => {
+    expect(needsFullContext('I can only see 2 of 150 findings; I need the full output.')).toBe(true);
+    expect(needsFullContext('148 entries were omitted, so I cannot enumerate them.')).toBe(true);
+    expect(needsFullContext('생략된 항목이 있어 전부 나열할 수 없습니다. 전체 출력이 필요합니다.')).toBe(true);
+    // no signal → no recovery
+    expect(needsFullContext('Here are the 3 actionable findings: A, B, C.')).toBe(false);
+    expect(needsFullContext('All logs show status ok; no anomalies.')).toBe(false);
+  });
+
+  test('shouldRecover: only auto + applied + needy reply', () => {
+    const needy = 'I only saw 2 of 150; need the full output.';
+    const fine = 'Done — 3 findings triaged.';
+    process.env.CLADDING_HEADROOM = 'auto';
+    expect(shouldRecover(true, needy)).toBe(true);
+    expect(shouldRecover(false, needy)).toBe(false); // compression not applied
+    expect(shouldRecover(true, fine)).toBe(false); // no signal
+    process.env.CLADDING_HEADROOM = 'on';
+    expect(shouldRecover(true, needy)).toBe(false); // not auto
   });
 });

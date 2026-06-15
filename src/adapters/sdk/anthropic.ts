@@ -25,7 +25,7 @@
 import process from 'node:process';
 
 import {appendEvent, newEvent} from '../../events/log.js';
-import {compressContext} from '../../optimizer/headroom.js';
+import {compressContext, shouldRecover} from '../../optimizer/headroom.js';
 import type {CompressOutcome, OpenAIMessage} from '../../optimizer/headroom.js';
 import type {ContextKind} from '../../optimizer/profiles.js';
 import type {Transport} from '../host/transport.js';
@@ -138,7 +138,7 @@ export class AnthropicTransport implements Transport {
     const system = pickContent(outcome.messages, 'system') ?? persona.body;
     const userContent = pickContent(outcome.messages, 'user') ?? userMessage;
 
-    const response = await this.cachedClient.messages.create({
+    let response = await this.cachedClient.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
       // Cache the stable persona prefix (ephemeral, 5-min TTL): it is byte-identical
@@ -152,7 +152,25 @@ export class AnthropicTransport implements Transport {
       system: [{type: 'text', text: system, cache_control: {type: 'ephemeral'}}],
       messages: [{role: 'user', content: userContent}],
     });
-    const replyText = extractText(response.content);
+    let replyText = extractText(response.content);
+
+    // Auto-recovery (CLADDING_HEADROOM=auto): compression is lossy on the bulk
+    // it collapses. If it was applied AND the reply deterministically signals it
+    // needed the omitted data, re-dispatch this ONE turn with the original,
+    // uncompressed payload and use that reply instead. Bounded to a single retry.
+    if (shouldRecover(outcome.applied, replyText)) {
+      appendEvent(
+        ctx.cwd,
+        newEvent('compression', {applied: false, kind, recovered: true, fallbackReason: 'auto_recovered'}),
+      );
+      response = await this.cachedClient.messages.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: [{type: 'text', text: persona.body, cache_control: {type: 'ephemeral'}}],
+        messages: [{role: 'user', content: userMessage}],
+      });
+      replyText = extractText(response.content);
+    }
     return {
       identity: {
         author: 'llm',

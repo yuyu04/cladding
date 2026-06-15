@@ -41,6 +41,9 @@ export type FallbackReason =
   | 'simulate'
   | 'compute_error';
 
+/** The four master-switch modes. */
+export type HeadroomMode = 'off' | 'on' | 'simulate' | 'auto';
+
 /**
  * The seam's decision wrapper. `messages` is ALWAYS usable — it is the
  * compressed payload when `applied`, otherwise the untouched original.
@@ -55,19 +58,51 @@ export interface CompressOutcome {
 
 // --- Gates ---------------------------------------------------------------
 
-/** Master switch — off unless CLADDING_HEADROOM is 'on' or 'simulate'. */
-function mode(): string {
-  return process.env.CLADDING_HEADROOM ?? 'off';
+/** Master switch. `auto` = apply like `on`, but the caller may recover (below). */
+export function headroomMode(): HeadroomMode {
+  const m = (process.env.CLADDING_HEADROOM ?? 'off').toLowerCase();
+  return m === 'on' || m === 'simulate' || m === 'auto' ? m : 'off';
 }
 
 function enabled(): boolean {
-  const m = mode();
-  return m === 'on' || m === 'simulate';
+  const m = headroomMode();
+  return m === 'on' || m === 'simulate' || m === 'auto';
 }
 
 /** Simulate = compute predicted savings but DON'T apply them (dry run). */
 function simulating(): boolean {
-  return mode() === 'simulate';
+  return headroomMode() === 'simulate';
+}
+
+// --- Auto-recovery (CLADDING_HEADROOM=auto) ------------------------------
+//
+// Compression is lossy on the bulk it collapses (json_dedup drops outlier
+// values within same-shaped objects; log_dedup keeps anomalies but drops
+// repetition). `auto` mode applies compression optimistically, then lets the
+// caller (the SDK adapter) detect — deterministically, no LLM — whether the
+// model's reply signals it needed the omitted data, and if so re-dispatch that
+// ONE turn with the original uncompressed payload. Lossy-but-self-correcting.
+
+/**
+ * Deterministic detector: does a model reply signal it lacked the omitted
+ * (compressed-away) context? Matches the markers the compressor leaves
+ * (`__cladding_compressed__`, `… (×N more …)`) being referenced back, plus
+ * common "I can't see the full set" phrasings in English and Korean. Pure +
+ * conservative — a miss just means no recovery (degraded, never broken).
+ */
+export function needsFullContext(reply: string): boolean {
+  return /\b(omitted|compressed[- ]?away|truncat\w+|the (full|complete|entire|original) (output|context|list|log|set|payload|findings)|all \d+ (entries|findings|records|lines|items)|only (saw|see|have|\d+ of)|can(?:no|')t (see|tell|enumerate|determine|identify)|need (the|more|full))\b|생략|압축|전체 (출력|목록|내용|결과|데이터)|원본(이|을)? ?(필요|봐야)|전부 (필요|나열|봐야)/i.test(
+    reply,
+  );
+}
+
+/**
+ * Should the adapter re-dispatch uncompressed? Only in `auto` mode, only when
+ * compression was actually applied, and only when the reply signals a gap.
+ * Bounded to a single recovery (the caller does not loop).
+ */
+export function shouldRecover(applied: boolean, reply: string): boolean {
+  return headroomMode() === 'auto' && applied && needsFullContext(reply);
 }
 
 function minTokens(): number {

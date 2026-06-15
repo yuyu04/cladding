@@ -103,6 +103,23 @@ describe('AnthropicTransport', () => {
     expect(args.messages[0].content).toContain('No edits outside src/');
   });
 
+  test('auto mode does NOT recover when nothing was compressed (no false retry)', async () => {
+    // The adapter compresses with the protected 'spec' profile, so the persona+
+    // shard payload is never compressed → applied=false → recovery must not fire
+    // even under auto with a reply that *would* trigger the signal detector.
+    const saved = process.env.CLADDING_HEADROOM;
+    process.env.CLADDING_HEADROOM = 'auto';
+    try {
+      const {client, factory} = makeFakeClient('I can only see 2 of 150; I need the full output.');
+      const t = new AnthropicTransport({apiKey: 'sk-test', clientFactory: factory as never});
+      await t.invoke(PERSONA, CTX);
+      expect(client.messages.create).toHaveBeenCalledOnce(); // single dispatch, no recovery retry
+    } finally {
+      if (saved === undefined) delete process.env.CLADDING_HEADROOM;
+      else process.env.CLADDING_HEADROOM = saved;
+    }
+  });
+
   test('client is cached across invocations (factory called once)', async () => {
     const factory = vi.fn().mockReturnValue({
       messages: {create: vi.fn().mockResolvedValue({content: [{type: 'text', text: 'ok'}]})},

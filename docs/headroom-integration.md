@@ -139,6 +139,8 @@ environment variables:
 CLADDING_HEADROOM=off        # default — seam inert, zero behavior change
 CLADDING_HEADROOM=simulate   # dry run: compute & log predicted savings, send ORIGINAL payload
 CLADDING_HEADROOM=on         # active: apply native compression to eligible payloads
+CLADDING_HEADROOM=auto       # apply, but self-recover: re-dispatch uncompressed if the reply
+                             #   signals it needed the omitted data (compress-then-recover)
 
 CLADDING_HEADROOM_MIN_TOKENS=1500   # skip payloads smaller than this (default 1500)
 ```
@@ -151,6 +153,30 @@ circuit-breaker knob, because there is no subprocess. To use it:
 | **Off** (default) | unset `CLADDING_HEADROOM`, or `export CLADDING_HEADROOM=off` |
 | **Preview savings** (no risk) | `export CLADDING_HEADROOM=simulate` — the `compression` event logs predicted `tokensSaved`; the original payload is still sent |
 | **On** | `export CLADDING_HEADROOM=on` |
+| **On, self-correcting** | `export CLADDING_HEADROOM=auto` |
+
+### `auto` — compress-then-recover (mitigates the lossy risk)
+
+Compression is **lossy** on the bulk it collapses: `json_dedup` drops outlier
+*values* inside same-shaped objects (e.g. one `severity:error` finding hidden
+among 150 `info` ones), and `log_dedup` keeps anomalies but drops repetition.
+For audit/enumeration tasks that need every record, plain `on` can yield a
+worse answer for a smaller token bill.
+
+`auto` applies compression optimistically, then — **deterministically, with no
+LLM** — inspects the model's reply for signals that it lacked the omitted data
+(`needsFullContext()`: phrases like "omitted", "only saw N of", "need the full
+output", Korean "전체 출력이 필요", plus the compressor's own markers). On a hit it
+**re-dispatches that one turn with the original, uncompressed payload** (bounded
+to a single retry) and uses that reply, emitting a `compression` event with
+`recovered: true`. So the cheap path is taken by default and the full-fidelity
+path is taken only when the model actually needs it — lossy, but self-correcting.
+
+> Caveat: the detector is a conservative heuristic — a miss just means no
+> recovery (degraded cost, never broken correctness), and recovery only fires on
+> dispatches that actually compressed (with the current `spec`-profile call site,
+> the assembled persona+shard payload is protected, so `auto` is dormant there;
+> it activates wherever bulkier `json`/`logs` payloads flow through the seam).
 
 Set it in your shell, your CI env, or per-invocation:
 `CLADDING_HEADROOM=on clad <cmd>`.
