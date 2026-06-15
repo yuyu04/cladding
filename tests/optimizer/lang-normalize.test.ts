@@ -9,12 +9,13 @@ import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {
   detectLangHint,
   detectLatinLang,
+  i18nModel,
   looksNonEnglish,
   maskCode,
   normalizeToEnglish,
 } from '../../src/optimizer/lang-normalize.js';
 
-const ENV = ['CLADDING_I18N', 'CLADDING_I18N_MIN_CHARS'] as const;
+const ENV = ['CLADDING_I18N', 'CLADDING_I18N_MIN_CHARS', 'CLADDING_I18N_MODEL'] as const;
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
@@ -107,5 +108,17 @@ describe('normalizeToEnglish — never throws, passthrough on off-paths', () => 
     const out = await normalizeToEnglish(en, async () => 'X');
     expect(out.applied).toBe(false);
     expect(out.fallbackReason).toBe('looks_english');
+  });
+});
+
+describe('i18nModel — relay model selection (F-60b842 AC-f0650a)', () => {
+  test('defaults to the Sonnet 4.6 relay model', () => {
+    delete process.env.CLADDING_I18N_MODEL;
+    expect(i18nModel()).toBe('claude-sonnet-4-6');
+  });
+
+  test('honors the CLADDING_I18N_MODEL override', () => {
+    process.env.CLADDING_I18N_MODEL = 'claude-haiku-4-5-20251001';
+    expect(i18nModel()).toBe('claude-haiku-4-5-20251001');
   });
 });

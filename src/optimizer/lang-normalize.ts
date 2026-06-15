@@ -3,8 +3,8 @@
 // F-60b842 — non-English free-text intent (e.g. a large Korean planning doc
 // passed to `clad init docs/plan-ko.md`) costs ~1.8x the tokens of the
 // equivalent English when the expensive authoring model reads it. This module
-// normalizes such intent to English ONCE with a cheap model (Haiku) before the
-// selected model consumes it, so the expensive call reads fewer tokens.
+// normalizes such intent to English ONCE with a relay model (Sonnet 4.6) before
+// the selected model consumes it, so the expensive call reads fewer tokens.
 //
 // Scope is deliberately narrow (see docs/i18n-haiku-relay.md):
 //   · Only large, genuinely non-English intent is normalized — short or
@@ -265,9 +265,9 @@ export async function normalizeToEnglish(
   }
 }
 
-/** The cheap model used for normalization. Overridable for cost/quality tuning. */
+/** The relay model used for normalization. Overridable for cost/quality tuning. */
 export function i18nModel(): string {
-  return process.env.CLADDING_I18N_MODEL ?? 'claude-haiku-4-5-20251001';
+  return process.env.CLADDING_I18N_MODEL ?? 'claude-sonnet-4-6';
 }
 
 /** Whether the i18n normalization feature is switched on. */

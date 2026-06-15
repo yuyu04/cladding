@@ -51,7 +51,7 @@ acceptance_criteria:
   - id: AC-f0650a
     ears: event
     condition: "when clad init runs in SDK mode with an API key and CLADDING_I18N=on and the loaded intent is large and non-English"
-    action: "route the intent through a cheap model (Haiku) to English before the onboarding dispatch consumes it"
-    response: "src/cli/init.ts builds a translator via selectDispatcher({model: CLADDING_I18N_MODEL default claude-haiku-4-5}) — model override is honored only on SDK providers — and replaces intent with the English result before interpretOnboardingWithFallback; the expensive onboarding model then reads fewer (English) tokens"
-    text: "When clad init runs in SDK mode on large non-English intent, the system shall normalize it to English via a cheap model before onboarding."
+    action: "route the intent through a relay model (Sonnet 4.6) to English before the onboarding dispatch consumes it"
+    response: "src/cli/init.ts builds a translator via selectDispatcher({model: CLADDING_I18N_MODEL default claude-sonnet-4-6}) — model override is honored only on SDK providers — and replaces intent with the English result before interpretOnboardingWithFallback; the expensive onboarding model then reads fewer (English) tokens"
+    text: "When clad init runs in SDK mode on large non-English intent, the system shall normalize it to English via a relay model before onboarding."
     test_refs: ["tests/optimizer/lang-normalize.test.ts"]

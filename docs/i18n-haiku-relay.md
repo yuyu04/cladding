@@ -30,8 +30,15 @@ dramatic savings. We deliberately **did not** build that, because:
    prompt).
 
 So this feature is the **narrow, defensible win only**: normalize *large,
-genuinely non-English intent* to English **once** with a cheap model, before the
+genuinely non-English intent* to English **once** with a relay model, before the
 expensive onboarding model reads it. No back-translation. SDK mode only.
+
+> **Relay model — Sonnet 4.6 (since the Sonnet-relay update).** The relay
+> defaults to `claude-sonnet-4-6` rather than a bottom-tier model. Spec authoring
+> is the most nuance-sensitive task (see concern #2 above), and a lossy
+> translation pollutes the canonical spec the model re-reads every session — so
+> the relay trades a little cost for translation fidelity. Override with
+> `CLADDING_I18N_MODEL` if you want a cheaper round-trip.
 
 ## What
 
@@ -43,21 +50,21 @@ load intent (free-text or file body)
    ▼  (only if CLADDING_I18N=on AND not host/MCP mode)
 normalizeToEnglish(intent, cheapTranslator)
    │   · gate: length ≥ CLADDING_I18N_MIN_CHARS (400) AND looksNonEnglish()
-   │   · mask code/identifiers → translate via Haiku → unmask
+   │   · mask code/identifiers → translate via Sonnet 4.6 → unmask
    │   · never throws → original intent on any failure
    ▼
 English intent → interpretOnboardingWithFallback (expensive selected model)
 ```
 
-The expensive model now reads the leaner English intent. The cheap (Haiku)
-translation is a separate SDK call routed by `selectDispatcher({model: haiku})`.
+The expensive model now reads the leaner English intent. The relay (Sonnet 4.6)
+translation is a separate SDK call routed by `selectDispatcher({model})`.
 
 ## Components
 
 | File | Role |
 |---|---|
 | `src/optimizer/lang-normalize.ts` | Pure core: `looksNonEnglish()`, `maskCode()`, `normalizeToEnglish(text, translate)`, `i18nEnabled()`, `i18nModel()`. Never throws; translator is injected. |
-| `src/cli/init.ts` | Wires the hook after intent load: SDK-mode gate (`!getHostMcpServer()`), builds the Haiku translator via `selectDispatcher`, emits the event. |
+| `src/cli/init.ts` | Wires the hook after intent load: SDK-mode gate (`!getHostMcpServer()`), builds the Sonnet 4.6 translator via `selectDispatcher`, emits the event. |
 | `src/events/log.ts` | `lang_normalized` telemetry event. |
 
 The core is dependency-injected (the CLI passes the translator) so the optimizer
@@ -68,7 +75,7 @@ layer never imports an SDK and host mode simply never calls it.
 ```bash
 CLADDING_I18N=on|off                 # master switch (default: off)
 CLADDING_I18N_MIN_CHARS=400          # skip intents shorter than this
-CLADDING_I18N_MODEL=claude-haiku-4-5-20251001   # cheap translation model
+CLADDING_I18N_MODEL=claude-sonnet-4-6           # relay translation model (default)
 ```
 
 The translator is built with `selectDispatcher({model})`, which honors the model
@@ -91,7 +98,7 @@ npx vitest run tests/optimizer/lang-normalize.test.ts
 
 # end-to-end, SDK mode, large Korean intent
 CLADDING_I18N=on ANTHROPIC_API_KEY=... clad init docs/plan-ko.md
-#  → stderr: "normalized non-English intent → English (N→M chars) via claude-haiku-4-5…"
+#  → stderr: "normalized non-English intent → English (N→M chars) via claude-sonnet-4-6…"
 #  → .cladding/events.log.jsonl gains a lang_normalized event (charsBefore/After)
 
 # off by default — identical to before
@@ -113,7 +120,7 @@ So the canonical spec is now authored in **English by default**, with a
 onboarding → English canonical (docs/project-context.md, capabilities, flows)
                  │  (model reads this — token-lean, every session)
                  ▼
-        cheap model (Haiku) translates the prose doc
+        relay model (Sonnet 4.6) translates the prose doc
                  ▼
 docs/project-context.<lang>.md   ← human view, NOT the SSoT, never sent to model
 ```
@@ -165,6 +172,8 @@ normalization and the localized view trigger for any detected language.
 ## Caveats / follow-ups (out of scope)
 
 - **No back-translation.** Answers/artifacts stay English by design.
-- **Host mode is a no-op** — only SDK mode (API key) routes a cheap model.
-- A real token-savings A/B (Opus input saved vs added Haiku cost) is the natural
-  next step, mirroring `docs/headroom-ab-report.md`.
+- **Host mode is a no-op** — only SDK mode (API key) routes a relay model.
+- A real token-savings A/B (Opus input saved vs added Sonnet 4.6 relay cost) is
+  the natural next step, mirroring `docs/headroom-ab-report.md`. Note the relay
+  is now the same tier as the onboarding default, so the net win is leaner input
+  tokens and higher translation fidelity rather than a model-tier cost gap.
