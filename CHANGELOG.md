@@ -5,6 +5,153 @@ All notable changes to Cladding are documented here.
 Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-11 — Structural Harness
+
+**In one line:** governance stops being a request — hooks enforce it, a committed
+attestation stamps what was actually verified, the spec finally renders into
+human-readable documents, and the oracle policy controls its own cost.
+
+### Added
+
+- **Host hooks (Claude Code)** — the plugin ships five lifecycle hooks:
+  every session starts with the spec map injected; editing `status: done` into
+  a shard by hand is *blocked* (run `clad done` — it's earned, not written);
+  ending a session on fresh gate failures is blocked once (an identical,
+  unfixable failure lets you leave and resurfaces next session); drift nudges
+  after edits; natural prompts get a one-line routing suggestion.
+- **Verification attestation** — a GREEN strict `pre-push` gate writes
+  `spec/attestation.yaml` (a content hash per done feature, committed). The
+  new `STALE_ATTESTATION` detector (#36) flags shipped code that changed since
+  its last verified state — on fresh clones, in CI, and across squash/rebase.
+- **Strict skip-policy demand table** — under `--strict`, a skipped stage the
+  spec relies on is RED: declared language + done features demand the type
+  check; declared tests demand the runner; declared oracles demand the
+  conformance stage; a declared-safe deliverable demands the smoke. No demand →
+  skips stay green (no new false REDs).
+- **test_ref self-healing** — `clad sync` repairs refs whose files moved
+  (unique-basename match, anchor preserved) and suggests `derived:` candidates
+  for unannotated done ACs. Suggestions never satisfy the gate — only removing
+  the prefix (author confirmation) makes them count.
+- **`clad changelog`** — the spec renders into documents: capability-grouped
+  release notes, `--audit` (every AC with its verification refs marked
+  resolved/missing), `--catalog` (the whole spec in plain sentences). MCP tool
+  `clad_changelog` + a skill that renders EN+KO in this file's house style.
+- **`clad context` / `clad_get_context`** — the working set for one feature in
+  one call (focus + ancestors + scenarios + ai_hints + test_refs). Look up by
+  id, slug, or module path.
+- **`clad_run_gate`** — run the real gate pipeline from inside a session
+  (the MCP surface could previously only run drift). Mutating MCP tools now
+  return the gate state as a JSON field, and payloads carry `schema_version`.
+- **blind-author agent** — test/oracle authoring with *no read tools at all*:
+  "authored impl-blind" becomes a property of the toolset, not a promise.
+- **Oracle policy that binds behavior** — grown projects (≥8 done features)
+  get a report-only risk-weighted mandate (`unwanted` ACs; enforcement in
+  0.7) whose report names the EARS-untagged blind spot; out-of-policy
+  `clad_author_oracle` recordings are labeled `voluntary` with a cost note;
+  guidance keys authoring to `clad oracle --required`.
+- **Lifecycle ledger** — feature creation, every `done` attempt (kept or
+  reverted), and every gate run land in `.cladding/events.log.jsonl` with the
+  actor identity and git HEAD; logs rotate at 5 MB.
+- **`spec/index.yaml`** — one generated line per feature: lookup is a 1-file
+  grep at any scale (with `merge=union` friendliness and an INVENTORY_DRIFT
+  staleness check).
+- **Enforcement triggers** — `clad init --with-hook` installs pre-commit AND
+  pre-push hooks; `clad init --with-ci` scaffolds the authoritative CI gate
+  (`fetch-depth: 0`; client hooks are latency reducers, CI is where
+  enforcement is real).
+- **Terminology SSoT** — `docs/glossary.md` (EN + KO) locked by the test
+  suite; new feature ids are 8-hex (birthday-safe at thousands of shards).
+- **Ops visibility polish (F-95a096)** — a completion-claim utterance
+  ("looks done, wrap it up", "마무리") gets a dedicated earn-path card naming
+  `clad done` (the weakest measured engagement surface in the 0.6.0 A/B);
+  `clad doctor` summarizes the governance ledger (gate runs + last outcome,
+  done attempts/rejections, stop blocks, attestation entries) in text and
+  `--json`; `clad status` gains an `att` column — attestation freshness per
+  feature (✓ current / ! stale-or-unstamped / · n/a / - no attestation yet).
+
+### Changed
+
+- Renames with one-release aliases (removal in 0.7): `librarian` → `planner`,
+  `specialists` → `developer`, `refine` → `clarify`, `panel` → `status`,
+  `drive` → `run`. The never-implemented `work` stub is removed.
+- SDK model defaults move to the current generation with a 16k output
+  ceiling; pin per-project via `.cladding/config.yaml` `agent.model`.
+- A drift pass loads the spec once instead of once per detector — a
+  5,000-shard gate runs in ~1.4 s (machine-enforced budget).
+
+### Fixed (found by installing 0.6.0 like a real user)
+
+- `clad sync`'s test_ref repair corrupted paths under the real invocation
+  (`cwd='.'`) and looped on its own output — fixed with regression tests that
+  run exactly the real way.
+- The gate no longer auto-installs npm packages: bare `npx tsc` on a
+  toolchain-less machine fetched and executed the typosquat `tsc@2.0.4`.
+  All toolchain calls are `npx --no-install`; an absent tool is an honest
+  skip the demand table escalates.
+- `clad serve`'s banner moved off stdout (the MCP wire) to stderr.
+
+### Deprecated
+
+- `ai_hints.token_budget_per_session` (never had a runtime consumer) — still
+  accepted, no longer written; removal in 0.7.
+
+### Verified
+
+- Real-user battery 31/31 on a tarball install; three-arm hard-task build
+  measured (the full report: `docs/benchmarks/v0.6.0-real-user-verification.md`)
+  — hooks halve the cost of running cladding and produced the only
+  defect-free arm; honest readings included (greenfield conformance remains
+  tied with vanilla; the premium buys traceability and enforcement).
+
+## [0.5.2] — 2026-06-08 — Fixes from installing 0.5.1 like a real user
+
+**In one line:** we installed 0.5.1 the way a new user does — from npm, then through the marketplace
+plugin — and fixed the rough edges that surfaced. The Claude Code plugin now works on its own without a
+separate global install, a green gate no longer hides "your tests never actually ran," and several error
+messages now tell you what to do instead of leaving you to guess. Nothing here changes a green build that was
+already honest; it closes the gaps where green wasn't.
+
+### Added
+
+- **The gate now runs your project's actual entry point.** A new check (`Deliverable smoke`) executes the
+  deliverable you declare in `spec.yaml` (e.g. `./run`, your CLI) once a feature is done, and fails if it
+  crashes — catching the case where the code's own unit tests pass but the *shipped entry point* is broken
+  (because the tests exercise internals and never invoke the entry). It runs only an entry you explicitly mark
+  `is_safe_to_smoke: true`, with a timeout, and never on every commit — so it never auto-runs arbitrary code. A
+  companion detector warns when a finished feature ships code but declares no deliverable to smoke-test. It
+  costs nothing extra (no AI involved) — a cheap floor under the opt-in spec-conformance oracle, which still
+  owns the harder "runs but produces the wrong answer."
+
+### Fixed
+
+- **The Claude Code marketplace plugin now works on its own.** Installing just the plugin used to leave its
+  MCP server dead unless you had *also* run `npm install -g cladding` — the server shelled out to a global
+  `clad` that wasn't there. The plugin now ships the engine inside itself and launches it directly, so it
+  works with nothing else installed. (Codex and Gemini still use the global `clad`; the README now says so
+  plainly.)
+- **A green gate can no longer hide "the tests never ran."** If the test runner wasn't installed, the gate
+  treated the skipped test step as a pass — so a feature marked *done* could be entirely unverified and still
+  go green. Under `--strict`, a *done* feature whose tests did not run now fails, with a message telling you
+  to install the test framework.
+- **A missing scanner is a setup gap, not a fake "secret found."** When the secret or architecture scanner
+  could not run (no config on a fresh project), the gate reported it as if it had *found* a violation. It now
+  correctly says it "couldn't scan" instead of raising a false alarm — and a scanner that genuinely finds
+  something still fails the gate.
+- **Agent personas load on a real install.** The five personas (orchestrator, librarian, reviewer,
+  observability, specialists) failed to resolve when cladding ran from an npm install rather than the source
+  tree; they are now shipped next to the engine and found in every run mode.
+- **Clearer `test_ref` errors.** A test reference that points at a specific test inside a file
+  (`tests/x.test.ts#parses a tag`) now resolves correctly, and when a reference really is broken the message
+  lists the forms it accepts instead of only saying it "resolves to nothing."
+
+### Changed
+
+- **`clad drive` is marked experimental and now fails honestly.** The headless autonomous loop needs an LLM
+  transport that is not built yet, and nothing auto-invokes it — the supported path is host-delegated (your
+  AI tool drives the per-feature cadence). A run that produces only empty stubs now says so and exits non-zero
+  instead of reporting "all work complete," and `clad rollback` makes clear that it prints the git command for
+  you to run rather than executing it itself.
+
 ## [0.5.1] — 2026-06-05 — A gate that can catch a hidden bug
 
 **In one line:** until now, `clad check` went green whenever *your code's own tests* passed — even if the
