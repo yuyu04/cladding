@@ -4,10 +4,10 @@
 # --tier=pre-push --strict` GREEN refreshes. Content-anchored: survives
 # fresh clones and squash/rebase (suggested .gitattributes: merge=union).
 attested:
-  F-001: 1eb56cee6b065fbe
+  F-001: 057fb7e929de3dd4
   F-002: c116a9d32f862ee9
   F-003: 8eac74ade368173f
-  F-004: 791125e674b98fb5
+  F-004: 02679764caa40808
   F-005: 70c3b7166f297bff
   F-006: 488cb6f2d452a286
   F-007: d1c159c46d5a454f
@@ -28,7 +28,7 @@ attested:
   F-020: 2c5f4a94e3e57e9b
   F-021: 8a1a82a59a1c45c7
   F-022: 8f596a1c737f6d42
-  F-023: 0c14948e5a91bb0f
+  F-023: 293a0b1bef86e3cb
   F-024: f67a86816b06f8ee
   F-025: 187339b684896b8e
   F-026: bb35faf43ba582cb
@@ -101,23 +101,24 @@ attested:
   F-2de65d: 84ad71574d306c81
   F-315fd7: 5a555f824e4bc642
   F-31eeb8: d88a9880d29ae411
-  F-32b1e0: 752c6fc6597a1711
+  F-32b1e0: 911e0ba26cc4b5b5
   F-3788c2: 0c1ae99c0cd756ab
   F-37b4a8: e067655bad681488
-  F-3a5339: 0a1979737368613b
+  F-3a5339: bba9fc1558718b42
   F-3b3690: 66c098ef8c25ad29
   F-40327b: 394b4ecbd20ed23c
   F-417ff0: 2ed14fe2c70c8509
   F-42af48: d5c989097f3ba811
   F-43d8e3: bbea25941e2b675d
   F-4747ef: ae95a19aa0a0311d
+  F-47b8bee5: f84e93fcfd514394
   F-4db939: 1ee1a30f68e6fb16
   F-50ff43: fac674314685a912
   F-551a1c: d5da7c6d3384c80d
   F-56abaa: 2cfc34ff58be51f3
   F-570a3f: d782269396829529
   F-59f093: 26735424fba6308c
-  F-5b9f9f: 9b66ee02892b2c8c
+  F-5b9f9f: 5722f3d939d7df04
   F-5d3ed2: 9452eac28760fb99
   F-5f6b45: 15323c4f5b619de7
   F-65814a: 2136c8b8c94ef535
@@ -150,7 +151,7 @@ attested:
   F-aee1da: a6d7525a6c547877
   F-aee61f: e009b9eb07addd30
   F-af96b1: e75ca2cb3412a7a5
-  F-b2094740: f379bf4feef6771a
+  F-b2094740: f84e93fcfd514394
   F-b43066: 9402b630adcf1eae
   F-b61449: 7095ce00662e987d
   F-b84c38: f6f9872d6ebb6424
@@ -174,7 +175,7 @@ attested:
   F-d7312b: a5c30a6e29fa450f
   F-d8223c: 0501e9564231899b
   F-d980359c: 8f1559276afc5c03
-  F-dd51b42c: 496eeffa2641169d
+  F-dd51b42c: cbad1c9c2f3fe9e6
   F-dddb89: f5625354e55eba9b
   F-e0f6c7: 3a140f9430a7c550
   F-eb732f: d8abb536ff850a7a
