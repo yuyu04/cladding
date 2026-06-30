@@ -63,6 +63,42 @@ function kotlinGates(cwd: string): ToolchainGates {
   };
 }
 
+/**
+ * Dart vs Flutter share the `pubspec.yaml` manifest; the SDK in use is what
+ * tells them apart. A Flutter package declares the flutter SDK (a `flutter:`
+ * stanza or a `sdk: flutter` dependency), so its gates run through the
+ * `flutter` wrapper (which bundles the Flutter-aware analyzer + test harness);
+ * a pure-Dart package gates with the bare `dart` CLI. Gates are a thunk so the
+ * pubspec is read once per detection.
+ */
+function dartGates(cwd: string): ToolchainGates {
+  let isFlutter = false;
+  try {
+    isFlutter = /(^|\n)\s*flutter\s*:|sdk:\s*flutter/.test(readFileSync(join(cwd, 'pubspec.yaml'), 'utf8'));
+  } catch {
+    /* unreadable pubspec → treat as pure Dart */
+  }
+  const lint: ToolSpec = {cmd: 'dart', args: ['format', '--output=none', '--set-exit-if-changed', '.']};
+  const secret: ToolSpec = {cmd: 'gitleaks', args: ['detect', '--no-banner']};
+  return isFlutter
+    ? {
+        type: {cmd: 'flutter', args: ['analyze']},
+        lint,
+        test: {cmd: 'flutter', args: ['test']},
+        coverage: {cmd: 'flutter', args: ['test', '--coverage']},
+        secret,
+      }
+    : {
+        type: {cmd: 'dart', args: ['analyze']},
+        lint,
+        test: {cmd: 'dart', args: ['test']},
+        coverage: {cmd: 'dart', args: ['test', '--coverage=coverage']},
+        secret,
+      };
+  // No `arch` gate: Dart/Flutter package imports are resolved acyclically by
+  // the SDK build, mirroring the rust/go/kotlin "compiler enforces it" stance.
+}
+
 /** Directories never worth descending into when probing for source files. */
 const SOURCE_PROBE_IGNORE = new Set([
   'node_modules', '.git', '.gradle', '.idea', 'build', 'target', 'dist', 'out', '.cladding',
@@ -225,6 +261,28 @@ const CHAIN: readonly Entry[] = [
       coverage: {cmd: 'dotnet', args: ['test', '--collect:"XPlat Code Coverage"']},
       secret: {cmd: 'gitleaks', args: ['detect', '--no-banner']},
     },
+  },
+  {
+    // Swift Package Manager. Xcode-only apps (no Package.swift) gate via a
+    // `.cladding/config.yaml::gate.commands` xcodebuild override — matching
+    // `.xcodeproj` here would wrongly point `swift build` at a project SPM
+    // cannot drive. No `arch` gate: SPM resolves module imports acyclically.
+    language: 'swift',
+    manifests: ['Package.swift'],
+    gates: {
+      type: {cmd: 'swift', args: ['build']},
+      lint: {cmd: 'swiftlint', args: ['lint']},
+      test: {cmd: 'swift', args: ['test']},
+      coverage: {cmd: 'swift', args: ['test', '--enable-code-coverage']},
+      secret: {cmd: 'gitleaks', args: ['detect', '--no-banner']},
+    },
+  },
+  {
+    // Dart + Flutter share pubspec.yaml; the gates thunk reads it to pick the
+    // `flutter` wrapper vs the bare `dart` CLI. @see dartGates.
+    language: 'dart',
+    manifests: ['pubspec.yaml'],
+    gates: dartGates,
   },
 ];
 
