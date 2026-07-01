@@ -36,8 +36,19 @@ import {saveState, type OnboardingState} from './scan/onboarding-state.js';
 import {detectToolchain} from '../stages/toolchain/detect.js';
 import {writeAgentsMd, writeClaudeMdSection} from '../init/host-instructions.js';
 import {getCurrentCladdingVersion, getLastSetupVersion} from '../init/host-setup.js';
-import {installPreCommitHook} from '../init/git-hook.js';
+import {installGitHook} from '../init/git-hook.js';
 import {loadIntentFromPathIfApplicable} from './intent-from-path.js';
+import {getHostMcpServer} from '../adapters/host/sampling-context.js';
+import {appendEvent, newEvent} from '../events/log.js';
+import {
+  i18nEnabled,
+  i18nModel,
+  normalizeToEnglish,
+  type TranslateFn,
+} from '../optimizer/lang-normalize.js';
+import {parse as parseYaml} from 'yaml';
+
+import {canonicalLang, langDisplayName, viewLang} from './scan/spec-lang.js';
 
 export interface InitOptions {
   readonly cwd?: string;
@@ -64,6 +75,8 @@ export interface InitOptions {
    * default — cladding never touches `.git/` without this explicit opt-in.
    */
   readonly withHook?: boolean;
+  /** Scaffold the authoritative CI gate workflow (F-16746b). */
+  readonly withCi?: boolean;
 }
 
 export interface InitResult {
@@ -210,9 +223,9 @@ function specSeed(
     if (h.preferred_persona) {
       projectLines.push(`    preferred_persona: ${h.preferred_persona}`);
     }
-    if (typeof h.token_budget_per_session === 'number') {
-      projectLines.push(`    token_budget_per_session: ${h.token_budget_per_session}`);
-    }
+    // token_budget_per_session: DEPRECATED 0.6.0 (F-b43066) — zero runtime
+    // consumers ever existed; no longer written. The schema accepts existing
+    // specs carrying it until 0.7 (deleting now would false-RED them).
     if (h.test_framework) {
       projectLines.push(`    test_framework: ${h.test_framework}`);
     }
@@ -258,6 +271,55 @@ function appendIfMissing(gitignorePath: string, marker: string, line: string): b
   const ensureNewline = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
   writeFileSync(gitignorePath, `${existing}${ensureNewline}\n# Cladding runtime state\n${line}\n`);
   return true;
+}
+
+
+/** F-16746b — the authoritative gate: client hooks are per-dev bypassable
+ * (--no-verify is printed in the hook body itself); CI + branch protection is
+ * where enforcement is real. Scaffolds a starting-point workflow the user
+ * owns afterwards; never overwrites an existing file. */
+export function scaffoldCiWorkflow(cwd: string): 'created' | 'exists' {
+  const path = join(cwd, '.github', 'workflows', 'cladding.yml');
+  if (existsSync(path)) return 'exists';
+  mkdirSync(join(cwd, '.github', 'workflows'), {recursive: true});
+  writeFileSync(
+    path,
+    [
+      '# Cladding · authoritative gate — scaffolded by `clad init --with-ci`.',
+      '# Local git hooks reduce latency; THIS check (as a required status check',
+      '# under branch protection) is where enforcement is real.',
+      'name: cladding gate',
+      'on:',
+      '  push:',
+      '  pull_request:',
+      'jobs:',
+      '  gate:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - uses: actions/checkout@v4',
+      '        with:',
+      '          fetch-depth: 0 # history-aware detectors (attestation/staleness) need more than a shallow clone',
+      '      - uses: actions/setup-node@v4',
+      '        with: {node-version: 22}',
+      '      - run: npm ci || npm install',
+      '      - run: npx --yes cladding check --tier=pre-push --strict --json',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  return 'created';
+}
+
+/** F-80d19d AC-006/AC-007 — informational host-wire notice for `clad init`.
+ * Returns null when the wire state matches the running binary (no notice). */
+export function hostWireNotice(lastSetup: string | null, pkgVersion: string | null): string | null {
+  if (lastSetup == null) {
+    return 'host channels not wired yet — run `clad setup` to enable `/cladding init` from Claude Code / Codex / Gemini';
+  }
+  if (pkgVersion && lastSetup !== pkgVersion) {
+    return `host wire was set up at v${lastSetup} (current binary v${pkgVersion}) — symlinks usually auto-follow, but run \`clad setup\` to be sure`;
+  }
+  return null;
 }
 
 /**
@@ -312,6 +374,40 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
       process.stderr.write(`[clad init] loaded intent from ${resolution.loadedFrom}\n`);
     }
     intent = resolution.intent;
+  }
+
+  // F-60b842 — i18n intent normalization. When a large non-English intent
+  // (e.g. a Korean planning doc loaded above) is about to be sent to the
+  // expensive onboarding model, translate it to English ONCE with a cheap
+  // model so the expensive call reads ~1.8x fewer tokens. SDK mode only:
+  // model selection is honored on direct SDK providers but NOT on host/MCP
+  // sampling, so we skip when a host MCP server is wired (host no-op). The
+  // normalizer never throws — on any failure the original intent is used.
+  if (intent && intent.length > 0 && i18nEnabled() && !getHostMcpServer()) {
+    const translator: TranslateFn | null = selectDispatcher({
+      noLlm: opts.noLlm,
+      model: i18nModel(),
+    });
+    const outcome = await normalizeToEnglish(intent, translator);
+    if (outcome.detectedNonEnglish) {
+      if (outcome.applied) {
+        process.stderr.write(
+          '[clad init] normalized non-English intent → English ' +
+            `(${outcome.charsBefore}→${outcome.charsAfter} chars) via ${i18nModel()}\n`,
+        );
+        intent = outcome.text;
+      }
+      appendEvent(
+        cwd,
+        newEvent('lang_normalized', {
+          applied: outcome.applied,
+          charsBefore: outcome.charsBefore,
+          charsAfter: outcome.charsAfter,
+          model: i18nModel(),
+          ...(outcome.fallbackReason ? {fallbackReason: outcome.fallbackReason} : {}),
+        }),
+      );
+    }
   }
 
   // v0.3.43 — intent-aware onboarding. When the user passes a free-text
@@ -519,6 +615,38 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
   }
   writeArtifact(cwd, 'docs/project-context.md', projectContextMd, created, proposals);
 
+  // F-36f11b — localized companion view. The canonical project-context.md is
+  // authored in CLADDING_SPEC_LANG (default English) so the model reads a
+  // token-lean body on every session. For humans who entered a non-English
+  // intent, generate a NON-AUTHORITATIVE localized view via a cheap model.
+  // SDK mode only (model override is honored on direct providers): skip in
+  // host/MCP mode. Best-effort — any failure leaves init untouched.
+  const companionLang = viewLang(intent);
+  if (companionLang && !getHostMcpServer()) {
+    const translator = selectDispatcher({noLlm: opts.noLlm, model: i18nModel()});
+    if (translator) {
+      // View 1 — the forest-level prose doc (always present).
+      await emitLocalizedView(
+        cwd,
+        `docs/project-context.${companionLang}.md`,
+        projectContextMd,
+        companionLang,
+        translator,
+      );
+      // View 2 — capabilities + scenarios digest (intent/onboarding path only).
+      if (onboarding) {
+        const digest = buildSpecDigest(onboarding.capabilitiesYaml, onboarding.scenarios);
+        await emitLocalizedView(
+          cwd,
+          `docs/spec-view.${companionLang}.md`,
+          digest,
+          companionLang,
+          translator,
+        );
+      }
+    }
+  }
+
   // v0.3.45 (F-d12edf) — onboarding scenarios. Each scenario from the
   // intent-aware onboarding lands in spec/scenarios/<slug>-<hash6>.yaml
   // so `clad_create_feature` can later bind new features to them via
@@ -562,40 +690,48 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
   // F-80d19d — friendly warning when host channels were never wired or are
   // out of sync with the current cladding binary. `clad setup` is the explicit
   // command for wiring; this is informational only and does not block init.
-  const lastSetup = getLastSetupVersion();
   const pkgVersion = getCurrentCladdingVersion();
-  if (lastSetup == null) {
-    skipped.push(
-      'host channels not wired yet — run `clad setup` to enable `/cladding init` from Claude Code / Codex / Gemini',
-    );
-  } else if (pkgVersion && lastSetup !== pkgVersion) {
-    skipped.push(
-      `host wire was set up at v${lastSetup} (current binary v${pkgVersion}) — symlinks usually auto-follow, but run \`clad setup\` to be sure`,
-    );
-  }
+  const wireNotice = hostWireNotice(getLastSetupVersion(), pkgVersion);
+  if (wireNotice) skipped.push(wireNotice);
 
   // Phase 2 (opt-in) — ambient enforcement via a git pre-commit hook. Off
   // unless `--with-hook` is passed: cladding never writes to `.git/` without
   // explicit consent. The hook runs `clad check --tier=pre-commit` (drift /
   // arch / secret) so spec↔code drift is blocked at commit time automatically.
   if (opts.withHook) {
-    const hook = installPreCommitHook(cwd, {version: pkgVersion ?? undefined});
-    switch (hook.result) {
-      case 'created':
-        created.push('.git/hooks/pre-commit (clad check --tier=pre-commit)');
-        break;
-      case 'updated':
-        created.push('.git/hooks/pre-commit (refreshed to current version)');
-        break;
-      case 'unchanged':
-        skipped.push('.git/hooks/pre-commit (already installed)');
-        break;
-      case 'skipped-foreign':
-        skipped.push('.git/hooks/pre-commit exists and is not cladding-authored — pass --force to overwrite');
-        break;
-      case 'skipped-no-git':
-        skipped.push('--with-hook: no .git directory — run `git init` first, then re-run with --with-hook');
-        break;
+    // F-16746b — one opt-in installs the full local ladder: pre-commit
+    // (cheap, every commit) AND pre-push (strict tier — its first local
+    // trigger). CI remains the authoritative gate; hooks reduce latency.
+    for (const kind of ['pre-commit', 'pre-push'] as const) {
+      const tierNote = kind === 'pre-commit' ? 'clad check --tier=pre-commit' : 'clad check --tier=pre-push --strict';
+      const hook = installGitHook(kind, cwd, {version: pkgVersion ?? undefined});
+      switch (hook.result) {
+        case 'created':
+          created.push(`.git/hooks/${kind} (${tierNote})`);
+          break;
+        case 'updated':
+          created.push(`.git/hooks/${kind} (refreshed to current version)`);
+          break;
+        case 'unchanged':
+          skipped.push(`.git/hooks/${kind} (already installed)`);
+          break;
+        case 'skipped-foreign':
+          skipped.push(`.git/hooks/${kind} exists and is not cladding-authored — pass --force to overwrite`);
+          break;
+        case 'skipped-no-git':
+          skipped.push('--with-hook: no .git directory — run `git init` first, then re-run with --with-hook');
+          break;
+      }
+      if (hook.result === 'skipped-no-git') break; // one notice is enough
+    }
+  }
+
+  if (opts.withCi) {
+    const ci = scaffoldCiWorkflow(cwd);
+    if (ci === 'created') {
+      created.push('.github/workflows/cladding.yml (clad check --tier=pre-push --strict — the authoritative gate)');
+    } else if (ci === 'exists') {
+      skipped.push('.github/workflows/cladding.yml already exists — cladding never overwrites a CI workflow');
     }
   }
 
@@ -662,4 +798,98 @@ function writeArtifact(
   mkdirSync(dirname(target), {recursive: true});
   writeFileSync(target, body);
   created.push(relPath);
+}
+
+/**
+ * Translate `sourceBody` to `companionLang` and write a NON-AUTHORITATIVE
+ * localized view at `viewPath`. Best-effort (F-36f11b): never throws; emits a
+ * `spec_view_generated` event for telemetry whether it succeeds or fails.
+ */
+async function emitLocalizedView(
+  cwd: string,
+  viewPath: string,
+  sourceBody: string,
+  companionLang: string,
+  translator: (prompt: string) => Promise<string>,
+): Promise<void> {
+  try {
+    const langName = langDisplayName(companionLang);
+    const prompt = [
+      `Translate the following Markdown document to ${langName} faithfully.`,
+      'Preserve all Markdown structure, headings, code fences, identifiers',
+      '(e.g. F-1a2b3c), slugs, and surface values verbatim. Output ONLY the',
+      'translated Markdown.',
+      '',
+      '---',
+      sourceBody,
+    ].join('\n');
+    const translated = (await translator(prompt)).trim();
+    if (translated.length === 0) return;
+    const header =
+      '<!-- GENERATED VIEW — NOT THE SSoT. Regenerated by clad init/refine; do ' +
+      `not edit by hand. Canonical language: ${langDisplayName(canonicalLang())}. -->\n\n`;
+    const body = `${header}${translated}\n`;
+    const abs = join(cwd, viewPath);
+    mkdirSync(dirname(abs), {recursive: true});
+    writeFileSync(abs, body, 'utf8');
+    process.stderr.write(`[clad init] wrote localized view ${viewPath} via ${i18nModel()}\n`);
+    appendEvent(
+      cwd,
+      newEvent('spec_view_generated', {
+        viewLang: companionLang,
+        canonicalLang: canonicalLang(),
+        path: viewPath,
+        charsCanonical: sourceBody.length,
+        charsView: body.length,
+        ok: true,
+      }),
+    );
+  } catch (err) {
+    appendEvent(
+      cwd,
+      newEvent('spec_view_generated', {
+        viewLang: companionLang,
+        canonicalLang: canonicalLang(),
+        path: viewPath,
+        charsCanonical: sourceBody.length,
+        charsView: 0,
+        ok: false,
+        error: err instanceof Error ? err.message.slice(0, 200) : String(err),
+      }),
+    );
+  }
+}
+
+/**
+ * Build a human-readable English digest of capabilities + scenarios for the
+ * localized companion view. The canonical YAML stays English (model-read); this
+ * digest is only the source for the human `.lang.md` translation.
+ */
+function buildSpecDigest(
+  capabilitiesYaml: string,
+  scenarios: readonly {slug: string; title: string; flow: string}[],
+): string {
+  const lines: string[] = ['# Spec overview — capabilities & scenarios', ''];
+  try {
+    const parsed = parseYaml(capabilitiesYaml) as {
+      capabilities?: Array<{title?: string; summary?: string}>;
+    };
+    const caps = parsed?.capabilities ?? [];
+    if (caps.length > 0) {
+      lines.push('## Capabilities', '');
+      for (const c of caps) lines.push(`- **${c.title ?? ''}** — ${c.summary ?? ''}`);
+      lines.push('');
+    }
+  } catch {
+    // capabilities body not parseable — skip that section, still emit scenarios
+  }
+  if (scenarios.length > 0) {
+    lines.push('## Scenarios', '');
+    for (const s of scenarios) {
+      lines.push(`- **${s.title}** (${s.slug})`);
+      lines.push(`  ${s.flow.trim().replace(/\s*\n\s*/g, ' ')}`);
+      lines.push('');
+    }
+  }
+  return lines.join('\n');
 }

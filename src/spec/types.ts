@@ -6,13 +6,14 @@
 // architecture are optional in this brick — they unlock with later T2
 // bricks (sharding + per-tier validators).
 
-/** EARS pattern enum — see ironclad/ears.md (5 canonical patterns). */
+/** EARS pattern enum — see ironclad/ears.md (6 canonical patterns). */
 export type EarsPattern =
   | 'ubiquitous'
   | 'event'
   | 'state'
   | 'optional'
-  | 'unwanted';
+  | 'unwanted'
+  | 'complex';
 
 /** Feature lifecycle status. */
 export type FeatureStatus =
@@ -122,8 +123,10 @@ export interface ArchitectureLayerObject {
    * `ARCHITECTURE_FROM_SPEC` currently derives a layer's directory from
    * `name` (`src/<name>/`) and does NOT consume these globs — so a declared
    * `modules` is documentation for humans/reviewers, not a live binding. The
-   * LLM onboarding prompts no longer emit it (v0.4.x). Making the detector
-   * consume these globs is a tracked follow-up (docs/ssot-audit.md, J5b).
+   * deterministic scan renderer (`renderArchitectureYaml`, src/cli/scan/llm.ts)
+   * still emits it on `clad init --scan`, so it is live-but-advisory in real
+   * specs. Making the detector consume these globs is a tracked follow-up
+   * (docs/ssot-audit.md, J5b).
    */
   readonly modules?: readonly string[];
   readonly forbidden_imports?: readonly string[];
@@ -212,6 +215,65 @@ export interface OraclePolicy {
   readonly sample?: number;
 }
 
+/**
+ * The project's primary runnable deliverable (entry point) — the artifact a user
+ * actually invokes (e.g. `./run`, `./bin/cli`). DELIVERABLE_SMOKE (stage_2.4)
+ * EXECUTES it on `smoke_args` once any feature is `done`, asserting it does not
+ * crash — closing the "broken entry shipped green" gap that unit tests (which
+ * import internals, never the entry) structurally miss. Side-effect-bearing, so
+ * the gate runs it ONLY when the author vouches via `is_safe_to_smoke`. The
+ * companion pure detector DELIVERABLE_INTEGRITY flags a declared-but-missing path
+ * and warns when done features ship modules with no deliverable declared.
+ * v0.5.x. See stages/deliverable-smoke.ts.
+ */
+export interface Deliverable {
+  /** Executable entry path relative to the project root (e.g. `./run`). Must be directly runnable (shebang + exec bit) or an interpreter. */
+  readonly path: string;
+  /** Args passed to the entry for the smoke run (e.g. `['--version']`). Default `[]`. */
+  readonly smoke_args?: readonly string[];
+  /** Exit code that means success. Default `0`. */
+  readonly expect_exit?: number;
+  /** Hard timeout for the smoke run, ms. Default `5000`. */
+  readonly timeout_ms?: number;
+  /**
+   * The gate executes the entry ONLY when this is `true` — the author's explicit
+   * vouch that running it on `smoke_args` has no harmful side effects. Default
+   * falsy ⇒ DELIVERABLE_SMOKE skips (declaration-gated; never auto-runs arbitrary
+   * project code). A server/stateful entry should leave this false and rely on the
+   * impl-blind oracle instead.
+   */
+  readonly is_safe_to_smoke?: boolean;
+}
+
+/** Expected result of a smoke probe (F-g'). */
+export interface SmokeProbeExpect {
+  /** AC id this probe verifies. */
+  readonly ac?: string;
+  /** Exit code that means success. Default 0. */
+  readonly exit?: number;
+  /**
+   * AC-observable token the deliverable must emit on stdout. Present + matched ⇒
+   * a green PASS; ABSENT ⇒ the clean run is exit-only LIVENESS (non-green).
+   */
+  readonly token?: string;
+}
+
+/**
+ * A functional smoke probe (F-g'). The gate RE-EXECUTES it (LLM proposes / gate
+ * disposes): kind:cli runs `run` argv and asserts exit (+ optional token);
+ * kind:none has nothing to run (library/static) ⇒ N/A. Disposition mapping lives
+ * in stages/disposition.ts; the runner is stages/deliverable-smoke.ts.
+ */
+export interface SmokeProbe {
+  readonly kind: 'cli' | 'none';
+  /** argv for kind:cli (no shell); cwd = project root. */
+  readonly run?: readonly string[];
+  readonly expect?: SmokeProbeExpect;
+  readonly binds?: {readonly feature?: string; readonly modules?: readonly string[]};
+  /** Why this probe proves the AC (Why>What). */
+  readonly why?: string;
+}
+
 /** Project-level metadata. */
 export interface Project {
   readonly name: string;
@@ -252,6 +314,19 @@ export interface Project {
    * Added v0.3.56 (F-5b9f9f).
    */
   readonly ai_hints?: AiHints;
+  /**
+   * The project's runnable deliverable/entry. When declared with
+   * `is_safe_to_smoke: true`, DELIVERABLE_SMOKE (stage_2.4) executes it once a
+   * feature is done to prove the shipped entry actually runs. See Deliverable.
+   */
+  readonly deliverable?: Deliverable;
+  /**
+   * Functional smoke probes (F-g'). The gate RE-EXECUTES each: a cli probe whose
+   * stdout contains `expect.token` reads PASS; an exit-only probe (no token) reads
+   * LIVENESS (non-green); kind:none reads N/A. When present, takes precedence over
+   * the legacy `deliverable` in stage_2.4. See stages/deliverable-smoke.ts.
+   */
+  readonly smoke?: readonly SmokeProbe[];
 }
 
 /**

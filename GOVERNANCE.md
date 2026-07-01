@@ -86,7 +86,7 @@ The maintainer initiates a release with a single instruction (e.g. *"v0.1.0 rele
 Every PR must:
 
 1. Run `npm run typecheck && npm run lint && npm test && npm run stage:drift` clean.
-2. Add or update `spec.yaml` if it touches a shipped feature (`librarian` agent's territory).
+2. Add or update `spec.yaml` if it touches a shipped feature (`planner` agent's territory).
 3. Pass `npm run conformance` — 26/26 matched.
 4. Include a CHANGELOG entry under the right section (`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`).
 
@@ -99,7 +99,7 @@ If this is your first time touching cladding, the path from clone to opened PR i
 1. **Clone and install.** `git clone https://github.com/qwerfunch/cladding && cd cladding && npm install`. Node ≥ 20.
 2. **Pick a starting point.** Browse [issues tagged `good-first-issue`](https://github.com/qwerfunch/cladding/issues?q=is%3Aissue+is%3Aopen+label%3A%22good-first-issue%22) or, if you have your own idea, open an issue first to confirm the proposal fits §4.1 / §4.2 before writing code.
 3. **Branch off `develop`**, not `main`. Convention: `feature/<slug>` or `fix/<slug>`. Never push to `main` — releases ship via §3.
-4. **Run the four-check loop before pushing**: `npm test && npm run typecheck && npm run lint && node bin/clad check`. The first three must be clean; `clad check` must show 13/13 stages on a clean working tree.
+4. **Run the four-check loop before pushing**: `npm test && npm run typecheck && npm run lint && node bin/clad check`. The first three must be clean; `clad check` must be green (15-stage gate) on a clean working tree.
 5. **Open the PR against `develop`.** The repository's `.github/PULL_REQUEST_TEMPLATE.md` walks you through the §4.3 contract as a checkbox list. A maintainer (or a delegated independent reviewer) signs off before merge.
 
 For code style and comment policy across every language cladding supports, see [`AGENTS.md`](AGENTS.md) §4-5. For the broader first-PR experience, see `CONTRIBUTING.md`. For drift detector conventions specifically (especially the status-aware rule for `UNTESTED_AC` and `MISSING_TESTS`), see [`src/stages/detectors/README.md`](src/stages/detectors/README.md).

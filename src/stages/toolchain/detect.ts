@@ -4,20 +4,99 @@
 // Cargo.toml → go.mod → pom.xml → build.gradle → composer.json → mix.exs →
 // .csproj → Gemfile` and returns the first match. Each language has a
 // curated default per gate (chosen as the *most common* tool, not the only
-// one — users override per-stage via `CommandStageOptions`).
+// one — users override per-stage via `CommandStageOptions`). The TS/JS lint
+// gate additionally auto-selects biome/oxlint over the eslint default by
+// linter config-file presence (`resolveTsLint`); detection never installs.
 //
 // This is the polyglot adapter: cladding itself stays language-agnostic;
 // the *user project* decides which language tools run.
 
 import {existsSync, readdirSync} from 'node:fs';
+import type {Dirent} from 'node:fs';
 import {join} from 'node:path';
 
-import type {Language, Toolchain, ToolchainGates} from './types.js';
+import {kotlinCoverageTask} from './coverage-tool.js';
+import type {Language, Toolchain, ToolchainGates, ToolSpec} from './types.js';
 
 interface Entry {
   readonly language: Language;
   readonly manifests: readonly string[];
-  readonly gates: ToolchainGates;
+  /**
+   * Per-gate commands. A function form receives the project root so the
+   * gates can depend on runtime state (Kotlin resolves `./gradlew` vs the
+   * bare `gradle` executable per project).
+   */
+  readonly gates: ToolchainGates | ((cwd: string) => ToolchainGates);
+  /**
+   * Optional discriminator: file extensions (with leading dot) at least one
+   * of which must exist under the project before this entry matches. Used by
+   * Kotlin, which shares Gradle/Maven manifests with Java — a `.kt`/`.kts`
+   * file is what tells the two apart. When absent, the manifest match alone
+   * wins.
+   */
+  readonly requiresSource?: readonly string[];
+}
+
+/**
+ * Prefers the committed Gradle wrapper (`./gradlew`) over a bare `gradle`
+ * on PATH. The wrapper pins the Gradle version per project and is the
+ * idiomatic invocation for JVM repos; falling back to `gradle` keeps the
+ * gate runnable on wrapper-less checkouts (absent tool → npx-style skip).
+ */
+export function gradleCmd(cwd: string): string {
+  return existsSync(join(cwd, 'gradlew')) ? './gradlew' : 'gradle';
+}
+
+function kotlinGates(cwd: string): ToolchainGates {
+  const g = gradleCmd(cwd);
+  return {
+    type: {cmd: g, args: ['compileKotlin', 'compileTestKotlin']},
+    lint: {cmd: g, args: ['ktlintCheck']},
+    test: {cmd: g, args: ['test']},
+    // Coverage tool is selectable: explicit `.cladding/config.yaml`
+    // gate.coverage, else Kover auto-detect, else jacoco. @see coverage-tool.ts
+    coverage: {cmd: g, args: [kotlinCoverageTask(cwd)]},
+    secret: {cmd: 'gitleaks', args: ['detect', '--no-banner']},
+    // No `arch` gate: the Kotlin/JVM compiler enforces acyclic module
+    // imports, and forbidden-layer rules are enforced spec-side by the
+    // ARCHITECTURE_FROM_SPEC detector (dotted-import matcher).
+  };
+}
+
+/** Directories never worth descending into when probing for source files. */
+const SOURCE_PROBE_IGNORE = new Set([
+  'node_modules', '.git', '.gradle', '.idea', 'build', 'target', 'dist', 'out', '.cladding',
+]);
+
+/**
+ * Bounded BFS that answers "does a file with one of these suffixes exist
+ * anywhere under cwd?". Kotlin sources nest deep (`src/main/kotlin/<pkg>/`),
+ * so a flat `readdirSync` is not enough; the walk is capped so detection
+ * stays O(small) even on large trees.
+ */
+function hasSourceFile(cwd: string, suffixes: readonly string[]): boolean {
+  const queue: string[] = [cwd];
+  let visited = 0;
+  const CAP = 4000;
+  while (queue.length > 0 && visited < CAP) {
+    const dir = queue.shift()!;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, {withFileTypes: true});
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      visited++;
+      if (e.isDirectory()) {
+        if (SOURCE_PROBE_IGNORE.has(e.name) || e.name.startsWith('.')) continue;
+        queue.push(join(dir, e.name));
+      } else if (suffixes.some((s) => e.name.endsWith(s))) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 const CHAIN: readonly Entry[] = [
@@ -25,12 +104,19 @@ const CHAIN: readonly Entry[] = [
     language: 'typescript',
     manifests: ['package.json'],
     gates: {
-      type: {cmd: 'npx', args: ['tsc', '--noEmit']},
-      lint: {cmd: 'npx', args: ['eslint', '.']},
-      test: {cmd: 'npx', args: ['vitest', 'run']},
-      coverage: {cmd: 'npx', args: ['vitest', 'run', '--coverage']},
-      secret: {cmd: 'npx', args: ['secretlint', '**/*']},
-      arch: {cmd: 'npx', args: ['madge', '--circular', '--extensions', 'ts', '.']},
+      // --no-install everywhere (0.6.0, battery NOTE 1): a bare `npx tsc`
+      // AUTO-INSTALLS the typosquat package `tsc@2.0.4` (not TypeScript) on
+      // toolchain-less machines — the gate must never fetch and execute an
+      // unpinned third-party package. Absent tool → npx exits non-zero with
+      // "not found" → the stage's missing-tool classification → skip (exit 2),
+      // which the strict demand table (F-67d2e9) escalates when the spec
+      // relies on the stage.
+      type: {cmd: 'npx', args: ['--no-install', 'tsc', '--noEmit']},
+      lint: {cmd: 'npx', args: ['--no-install', 'eslint', '.']},
+      test: {cmd: 'npx', args: ['--no-install', 'vitest', 'run']},
+      coverage: {cmd: 'npx', args: ['--no-install', 'vitest', 'run', '--coverage']},
+      secret: {cmd: 'npx', args: ['--no-install', 'secretlint', '**/*']},
+      arch: {cmd: 'npx', args: ['--no-install', 'madge', '--circular', '--extensions', 'ts', '.']},
       smoke: {cmd: 'npm', args: ['run', '--silent', 'smoke']},
       perf: {cmd: 'npm', args: ['run', '--silent', 'perf']},
       visual: {cmd: 'npm', args: ['run', '--silent', 'visual']},
@@ -69,6 +155,17 @@ const CHAIN: readonly Entry[] = [
       coverage: {cmd: 'go', args: ['test', '-cover', './...']},
       secret: {cmd: 'gitleaks', args: ['detect', '--no-banner']},
     },
+  },
+  {
+    // Kotlin shares Gradle/Maven manifests with Java, so it must be probed
+    // *before* the Java entry and only matches when a .kt/.kts source file is
+    // actually present — otherwise a pure-Java/Maven repo would be misread.
+    // Gates are a thunk: the gradle command (`./gradlew` vs `gradle`) is
+    // resolved per project at detection time.
+    language: 'kotlin',
+    manifests: ['build.gradle.kts', 'build.gradle', 'pom.xml'],
+    requiresSource: ['.kt', '.kts'],
+    gates: kotlinGates,
   },
   {
     language: 'java',
@@ -151,6 +248,41 @@ function hasExtensionFile(cwd: string, suffix: string): string | undefined {
 }
 
 /**
+ * TypeScript/JavaScript linter resolution by config-file presence (F-b2094740).
+ *
+ * `package.json` maps to one language ('typescript'), but the JS/TS ecosystem
+ * has several common linters. Rather than hardcode eslint, detect the linter
+ * the project actually configured and gate with THAT — so a biome/oxlint
+ * project passes stage_1.2 natively, no eslint shim. Precedence: biome →
+ * oxlint → eslint (the default, also used when no linter config is present, so
+ * eslint and config-less projects behave exactly as before).
+ *
+ * `--no-install` is kept on every gate: detection only decides WHICH tool to
+ * invoke, it NEVER installs one. A configured-but-absent linter still resolves
+ * to skip via stage_1.2's missing-tool path (lint.ts), which `--strict`'s
+ * skip-policy escalates when the spec relies on lint.
+ *
+ * CAVEAT — detection is by config-file PRESENCE, not content. A biome.json with
+ * `linter.enabled: false` (biome used only for formatting) still resolves to the
+ * biome lint gate, and `biome lint` then exits 0 — a filename cannot distinguish
+ * "configured to lint" from "configured to format only". A project that lints
+ * with a different tool overrides via CommandStageOptions (the cmd/args seam).
+ */
+const TS_LINTERS: ReadonlyArray<{readonly configs: readonly string[]; readonly gate: ToolSpec}> = [
+  {configs: ['biome.json', 'biome.jsonc'], gate: {cmd: 'npx', args: ['--no-install', 'biome', 'lint', '.']}},
+  // oxlint auto-detects all three filenames in cwd (oxc.rs config reference).
+  {configs: ['.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts'], gate: {cmd: 'npx', args: ['--no-install', 'oxlint']}},
+];
+
+/** The project's configured TS/JS lint gate, or `fallback` (eslint) when none. */
+function resolveTsLint(cwd: string, fallback: ToolSpec): ToolSpec {
+  for (const linter of TS_LINTERS) {
+    if (linter.configs.some((c) => existsSync(join(cwd, c)))) return linter.gate;
+  }
+  return fallback;
+}
+
+/**
  * Detects the project's toolchain by walking a priority chain of manifests.
  *
  * The first matching language wins. `.csproj` / `.sln` / `.fsproj` are matched
@@ -173,9 +305,21 @@ export function detectToolchain(cwd: string = '.'): Toolchain {
       }
       if (manifest) break;
     }
-    if (manifest) {
-      return {language: entry.language, manifest, gates: entry.gates};
-    }
+    if (!manifest) continue;
+    // Discriminator: a shared-manifest entry (Kotlin) only wins when one of
+    // its required source extensions is present; otherwise fall through to
+    // the next entry (Java).
+    if (entry.requiresSource && !hasSourceFile(cwd, entry.requiresSource)) continue;
+    // Kotlin gates are a function of cwd (gradlew vs gradle); resolve first.
+    const baseGates = typeof entry.gates === 'function' ? entry.gates(cwd) : entry.gates;
+    // TS/JS: pick the linter the project configured (biome/oxlint) over the
+    // eslint default, so a non-eslint project gates natively. Other languages
+    // keep their single curated default.
+    const gates =
+      entry.language === 'typescript' && baseGates.lint
+        ? {...baseGates, lint: resolveTsLint(cwd, baseGates.lint)}
+        : baseGates;
+    return {language: entry.language, manifest, gates};
   }
   return UNKNOWN;
 }

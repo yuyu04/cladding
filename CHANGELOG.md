@@ -5,6 +5,444 @@ All notable changes to Cladding are documented here.
 Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.0] — 2026-07-01 — Knowledge Graph
+
+### Knowledge graph (spec↔code↔doc)
+
+**In one line:** the links between spec, code, tests, and docs — which until now
+only flowed one way and were scattered across shards — become a single,
+always-current graph you can query for impact and *see* in a graph viewer.
+
+> **Heads-up:** this is a **traceability and retrieval** capability, not a
+> correctness one. It does not make generated code more correct (cladding's own
+> A/B record shows that is orthogonal). What it does: pull the exact relevant
+> neighborhood in one call instead of grepping, and stop doc/spec links from
+> silently rotting.
+
+**Added**
+
+- **Reverse-edge index (backlinks).** Every forward edge the spec already carries
+  (`depends_on`, `modules`, `test_refs`) is now also queryable in reverse —
+  derived in memory, 0 bytes on disk. Module ownership is many-to-many on purpose
+  (a file records every feature that touches it).
+- **`clad impact <feature|file>` + the `clad_get_impact` agent tool.** The blast
+  radius for a change: everything that transitively depends on it, the scenarios
+  at risk, and the exact set of tests to re-run. The backward complement of
+  `clad context` (what this needs) ↔ impact (what depends on this). A module path
+  fans out to every feature that touches it.
+- **Doc graph + link integrity.** `clad sync` indexes which docs reference which
+  features and which docs link to which docs (`spec/_doc-links.yaml`). A new check
+  fails on a dead doc-to-doc link and warns on a doc citing a feature that no
+  longer exists. Scoped to skip fixture dirs, code examples, and docs marked
+  `clad-doc-links: ignore`, so it stays quiet on illustrative ids.
+- **`clad graph export` + `clad graph stats`.** See the whole spec↔code↔doc graph
+  in a viewer you already have: `--format mermaid` for a PR, `--format obsidian`
+  for a navigable vault (one note per node with backlinks), `dot`/`json` for any
+  graph tool. `--focus <id> --depth N` exports just one neighborhood. `stats`
+  ranks the load-bearing hubs by degree.
+- **Our own graph viewer, colored by SSoT layer.** `clad graph export --format
+  html` writes one self-contained file you can double-click — a dependency-free
+  interactive graph (no internet, no install). Each spec layer gets its own color
+  (sealed spec / design / derived / audit), code sits in a neutral tone, and
+  features show their readable slug instead of an opaque id. Search, filter by
+  layer or kind, hover to light up a neighborhood, drag to pin, a "Live/Calm"
+  toggle, light/dark — all in one offline page.
+- **A live graph that follows your work.** `clad graph serve` opens the same
+  viewer at a local address and **updates itself as you edit** — change the spec
+  or a doc and the open page reflects it, no re-export. Agents can read the same
+  always-current graph through the new `clad_get_graph` tool.
+- **An Obsidian-grade viewer.** The layout is now a continuously-running force
+  simulation: drag a node and the web stretches and recoils with real tension;
+  hovering pauses the motion so you can read; four force sliders (center / repel /
+  link / link distance) retune it live. Each node class has its own color — the
+  four spec layers, and code/test/doc each distinct — so the structure reads at a
+  glance.
+- **The killer: live conformance, healing as you watch.** Every node carries its
+  real spec↔code health, computed from cladding's own drift detectors — a feature
+  whose test went missing, a file no feature claims, a doc pointing at a deleted
+  feature. Problem nodes glow; **fix the drift and the glow clears in real time**
+  (`clad graph serve`), with a top "in-sync %" pill. The graph IS the gate, made
+  visible — something only a tool that keeps spec and code connected-and-current
+  can show. (Static exports embed a point-in-time snapshot.)
+
+**Notes**
+
+- Drift detectors: 37 → 40 — this work adds `DOC_LINK_INTEGRITY` and `INFERABLE_DEPENDS_ON`; develop's `UNVERIFIED_AC` (below) is the third.
+- The viewer is hand-rolled (no bundled third-party graph library) to stay
+  dependency-free and fully offline; the layout draws itself and settles, then
+  stays calm. It is a way to *see and navigate* the spec↔code↔doc structure, not
+  a correctness check — run `clad check` for that.
+- Design + measured cost/benefit model: `docs/knowledge-graph/design.md`.
+### Added
+
+- **EARS `complex` pattern — the 6th canonical shape** (`F-9d168287`) — `src/spec/ears.ts`
+  implemented 5 of the 6 EARS patterns; the 6th, `complex` (a precondition combined
+  with a trigger, e.g. *"While the aircraft is on the ground, when reverse thrust is
+  commanded, the system shall …"*), was missing, and the validator keyed on the first
+  trigger word only — so a multi-clause `While … when …` requirement either failed
+  validation or was forced into a single-keyword bucket, silently losing the trigger
+  clause. `complex` is now a first-class `EarsPattern`: `checkEarsShape` validates BOTH
+  clauses (a leading `while` precondition AND a `when` trigger) and names the missing
+  one, preserving the precondition→trigger relationship EARS exists to capture. Purely
+  additive — the existing five patterns validate exactly as before. The new value is
+  mirrored across every enum site (`types.ts`, `spec/schema.json` ac.ears + always_ears,
+  `new.ts`, the MCP server enum) to keep authoring/validation/schema in lockstep.
+
+- **`UNVERIFIED_AC` drift detector — AC → test → *observed pass*** (`F-96700032`)
+  — closes the one soft spot in the otherwise execution-based gate. `UNTESTED_AC`
+  only checks that a done AC's `test_refs` *exist on disk*, so an empty file, a
+  `test.skip`, or a failing test still satisfied it. When a JUnit XML report is
+  available — `gate.test_report` in `.cladding/config.yaml`, or a conventional
+  path (`test-report.junit.xml`, `coverage/junit.xml`, `.cladding/test-report.junit.xml`)
+  — `UNVERIFIED_AC` confirms each done AC's referenced tests actually **ran and
+  passed**: failing/errored or only-skipped tests are an `error`, and a test_ref
+  absent from a present report is a `warn` (a scoped/partial run is legitimate;
+  `--strict` promotes it). **Graceful by default:** with no report present the
+  detector emits nothing, leaving `UNTESTED_AC`'s existence check as the baseline,
+  so projects that don't emit JUnit XML are unaffected. Parsing is pure and
+  regex-based (no XML dependency), mirroring the coverage-XML approach.
+
+- **`UNVERIFIED_AC` multi-framework `test_ref`↔testcase matching** (`F-d980359c`)
+  — the matcher was effectively vitest-only: it keyed every testcase by its
+  `classname` and assumed that was a file path. pytest (`tests.test_foo`),
+  Java/Kotlin (`com.example.FooTest`), and `file=`-attribute emitters therefore
+  never matched, so a *passing* test read as **`absent`** (a false positive under
+  `--strict`) and a *real* fail/skip was mis-reported as "did not run". The
+  parser now indexes each testcase under every path-shaped key it can derive
+  (the `file=` attribute, the `classname` as-is, and a dot→slash conversion of a
+  dotted classname) and matches `test_refs` **extension-agnostically**
+  (`FooTest` ↔ `FooTest.kt`). **Confident-or-degrade:** a report whose keys are
+  none path-like (e.g. jest describe-title `classname`s that cannot be mapped to
+  files) is treated as unmappable and the detector emits nothing, rather than
+  flooding false `absent` findings — preserving the low-false-positive contract.
+  Measured A/B (OLD = `classname`-only): correct verdicts across a
+  vitest/pytest/Kotlin/jest matrix went **2/8 → 8/8**; parse cost on a 10k-case
+  report grew by ~1.6 ms (vitest-shaped) to ~7.8 ms (pytest-shaped) per gate run
+  — noise against the ~50 s gate.
+
+## [0.6.3] — 2026-06-26 — Honest Status
+
+**In one line:** the one-line-per-feature index that agents grep (and that feeds
+the session-start status card) can no longer lie about a feature's status — `clad
+done` keeps it fresh, and the staleness check now catches a wrong status; plus a
+first-class Kotlin module-scoped gate with selectable Kover/JaCoCo coverage.
+
+> **Heads-up:** nothing changes for a green project. This closes a case where a
+> finished feature kept reading *in progress* in `spec/index.yaml` until the next
+> `clad sync` — and where that stale status slipped past the gate.
+
+### Added
+
+- **Module-scoped gate (Kotlin Gradle monorepos)** — when a focus feature
+  declares `modules[]`, the command stages (type / lint / unit / coverage) now
+  run **only that feature's Gradle projects** instead of the root aggregate.
+  `clad done <id>` scopes automatically from the feature's modules; `clad check
+  --feature <id>` opts a manual run in (plain `clad check` stays whole-repo, so
+  CI is unchanged). Module paths map to Gradle project paths by walking up to
+  the nearest `build.gradle[.kts]` + `gradle.properties` ancestor
+  (`worker/agg/app` → `:worker:agg:app`), de-duplicated and run in a single
+  batched `./gradlew :a:test :b:test …` invocation.
+  - **Selectable Kotlin coverage (Kover | JaCoCo)** — the coverage tool is
+    chosen by `.cladding/config.yaml` `gate.coverage: kover | jacoco` (explicit,
+    highest precedence), else auto-detected (Kover plugin id referenced in the
+    root build, `settings`, version catalog `gradle/libs.versions.toml`, or a
+    `buildSrc`/`build-logic` convention plugin), else JaCoCo. The selection sets
+    BOTH the Gradle task (`koverXmlReport` / `jacocoTestReport`) and the report
+    path the `COVERAGE_DROP` detector reads — at the whole-repo gate and, applied
+    per module, the scoped gate. The detector probes Kover-first then JaCoCo by
+    existence and merges each scoped module's LINE counters into one aggregate.
+  - **`.cladding/config.yaml` `gate:` block** — optional override:
+    `gate.scope: feature | repo` (default `feature`; `repo` forces the old
+    whole-repo behavior) and `gate.commands.{type,lint,test,coverage}` templates
+    where a `{modules:TASK}` token expands to one `:project:TASK` per focus
+    project.
+  - **Backward-compatible** — non-Gradle languages, features with no `modules[]`,
+    and `gate.scope: repo` all run exactly as before. An unmappable module path
+    fails loudly (never a silent whole-repo fallback). The hook point is
+    language-neutral; non-Gradle build tools are a follow-up.
+
+### Fixed
+
+- **`clad done` refreshes the index in the same step.** On a kept flip the index
+  row becomes *done* immediately (no `clad sync` needed); on a reverted flip it
+  re-syncs back to the original status. The refresh runs *before* the gate so the
+  new status-aware check can't red the flip's own write.
+- **The staleness check compares each row's status, not just the id set.** A
+  `done` shard with an `in_progress` index row is now caught instead of passing
+  `clad check --strict` green. Both sides default to *planned* and strip quotes,
+  so a status-less or quoted shard never false-flags. (F-37b4a8)
+
+## [0.6.2] — 2026-06-25 — Honest Count
+
+**In one line:** the published number of verification stages was wrong — it said
+13 (the CLI said 14) while the gate has been running 15 all along — so this fixes
+the number everywhere and makes it derive from the gate itself, so it can't
+silently drift again.
+
+> **Heads-up:** nothing changes about how the gate runs — it already ran all 15
+> stages. Only the *advertised* count was off; no project behaves differently.
+
+### Fixed
+
+- **The advertised stage count (13 → 15).** The Claude Code manifest's stage list
+  was missing two stages the gate actually runs — spec-conformance and
+  deliverable-smoke — so it claimed 13; the CLI `--tier` help said 14; the README
+  said 15. Every surface now agrees on **15**. Check-instruction examples
+  ("13/13 stages clean") now read "15-stage gate green" — on a clean tree the
+  gate shows 9 passed and 6 skipped, so a fixed "N/N" would just be wrong a
+  different way.
+- **Two stale code comments** corrected to match the code: an impl-blindness
+  provenance check marked "deferred" that actually ships (it runs under an oracle
+  mandate), and an architecture field said to be no longer emitted that the scan
+  still emits. Plus a stale detector count in the check skill (24 → 37).
+
+### Added
+
+- **A self-check that keeps the count honest.** The plugin build now derives the
+  published stage list from the single list the gate actually runs, and an
+  integrity check fails if any manifest disagrees. The earlier 13-vs-15 gap had
+  shipped undetected because nothing guarded that list; it is now a live binding,
+  not a hand-maintained number.
+
+### Changed
+
+- **Contributor flow documented as git-flow with PR-always** — every merge lands
+  via PR, and `develop → main` is always a merge commit, never a squash (a past
+  squash put release commits outside `develop`'s ancestry and phantom-conflicted
+  the next release). Maintainer-facing only (`CLAUDE.md`).
+
+## [0.6.1] — 2026-06-25 — Honest Smoke
+
+**In one line:** the final gate now actually runs your finished program and checks it
+does the right thing — instead of only confirming it started — and honestly says when
+it can't.
+
+> **Heads-up:** nothing breaks, but a project that only confirmed its program *starts*
+> will now read **amber ("ran, but not really checked")** instead of green, until you
+> tell cladding how to verify a real result (a command + the output you expect).
+
+### Added
+
+- **Five honest gate results** — *passed* / *failed* / *couldn't run here* (needs a
+  database, a device…) / *needs a person to confirm* / *nothing to run* — instead of
+  quietly marking the unknowns green.
+- **Functional smoke checks** (`project.smoke`) — tell cladding how to exercise your
+  app (a command + the output you expect); the gate re-runs it and only calls it
+  *passed* when the real output matches.
+- **A "you skipped the check" detector** — a finished feature that ships a runnable
+  program but declares no check is now flagged (blocks under `--strict`), not a free pass.
+- **Lint config detection** — stage_1.2 picks the linter the project actually
+  configured (`biome` / `oxlint`) instead of always assuming eslint; no linter config
+  keeps the eslint default. Detection never installs and never leaks across languages.
+  (F-b2094740)
+
+### Changed
+
+- **"It started" no longer counts as "verified"** — a program that merely runs without
+  crashing now reads *ran, but not really checked* (amber), turning green only once you
+  give it a real check. cladding holds itself to this too.
+- **"Couldn't run" and "needs a person" now block** — honest non-results, never a
+  silent green.
+- **One new check (37 total)** — the published count was re-synced across the READMEs,
+  spec, docs, and diagrams; the A/B comparison reports were regenerated.
+
+### Fixed
+
+- **"Passes its tests but is actually broken"** — a program could ship green while its
+  real entry produced the wrong output (it started, exited cleanly, printed garbage).
+  The gate now re-runs the real program and catches it, for the behaviors you ask it to
+  check. Validated on fresh projects and in a 3-way build against 0.6.0 (which let the
+  broken program through), at essentially no extra cost.
+
+## [0.6.0] — 2026-06-11 — Structural Harness
+
+**In one line:** governance stops being a request — hooks enforce it, a committed
+attestation stamps what was actually verified, the spec finally renders into
+human-readable documents, and the oracle policy controls its own cost.
+
+### Added
+
+- **Host hooks (Claude Code)** — the plugin ships five lifecycle hooks:
+  every session starts with the spec map injected; editing `status: done` into
+  a shard by hand is *blocked* (run `clad done` — it's earned, not written);
+  ending a session on fresh gate failures is blocked once (an identical,
+  unfixable failure lets you leave and resurfaces next session); drift nudges
+  after edits; natural prompts get a one-line routing suggestion.
+- **Verification attestation** — a GREEN strict `pre-push` gate writes
+  `spec/attestation.yaml` (a content hash per done feature, committed). The
+  new `STALE_ATTESTATION` detector (#36) flags shipped code that changed since
+  its last verified state — on fresh clones, in CI, and across squash/rebase.
+- **Strict skip-policy demand table** — under `--strict`, a skipped stage the
+  spec relies on is RED: declared language + done features demand the type
+  check; declared tests demand the runner; declared oracles demand the
+  conformance stage; a declared-safe deliverable demands the smoke. No demand →
+  skips stay green (no new false REDs).
+- **test_ref self-healing** — `clad sync` repairs refs whose files moved
+  (unique-basename match, anchor preserved) and suggests `derived:` candidates
+  for unannotated done ACs. Suggestions never satisfy the gate — only removing
+  the prefix (author confirmation) makes them count.
+- **`clad changelog`** — the spec renders into documents: capability-grouped
+  release notes, `--audit` (every AC with its verification refs marked
+  resolved/missing), `--catalog` (the whole spec in plain sentences). MCP tool
+  `clad_changelog` + a skill that renders EN+KO in this file's house style.
+- **`clad context` / `clad_get_context`** — the working set for one feature in
+  one call (focus + ancestors + scenarios + ai_hints + test_refs). Look up by
+  id, slug, or module path.
+- **`clad_run_gate`** — run the real gate pipeline from inside a session
+  (the MCP surface could previously only run drift). Mutating MCP tools now
+  return the gate state as a JSON field, and payloads carry `schema_version`.
+- **blind-author agent** — test/oracle authoring with *no read tools at all*:
+  "authored impl-blind" becomes a property of the toolset, not a promise.
+- **Oracle policy that binds behavior** — grown projects (≥8 done features)
+  get a report-only risk-weighted mandate (`unwanted` ACs; enforcement in
+  0.7) whose report names the EARS-untagged blind spot; out-of-policy
+  `clad_author_oracle` recordings are labeled `voluntary` with a cost note;
+  guidance keys authoring to `clad oracle --required`.
+- **Lifecycle ledger** — feature creation, every `done` attempt (kept or
+  reverted), and every gate run land in `.cladding/events.log.jsonl` with the
+  actor identity and git HEAD; logs rotate at 5 MB.
+- **`spec/index.yaml`** — one generated line per feature: lookup is a 1-file
+  grep at any scale (with `merge=union` friendliness and an INVENTORY_DRIFT
+  staleness check).
+- **Enforcement triggers** — `clad init --with-hook` installs pre-commit AND
+  pre-push hooks; `clad init --with-ci` scaffolds the authoritative CI gate
+  (`fetch-depth: 0`; client hooks are latency reducers, CI is where
+  enforcement is real).
+- **Terminology SSoT** — `docs/glossary.md` (EN + KO) locked by the test
+  suite; new feature ids are 8-hex (birthday-safe at thousands of shards).
+- **Ops visibility polish (F-95a096)** — a completion-claim utterance
+  ("looks done, wrap it up", "마무리") gets a dedicated earn-path card naming
+  `clad done` (the weakest measured engagement surface in the 0.6.0 A/B);
+  `clad doctor` summarizes the governance ledger (gate runs + last outcome,
+  done attempts/rejections, stop blocks, attestation entries) in text and
+  `--json`; `clad status` gains an `att` column — attestation freshness per
+  feature (✓ current / ! stale-or-unstamped / · n/a / - no attestation yet).
+
+### Changed
+
+- Renames with one-release aliases (removal in 0.7): `librarian` → `planner`,
+  `specialists` → `developer`, `refine` → `clarify`, `panel` → `status`,
+  `drive` → `run`. The never-implemented `work` stub is removed.
+- SDK model defaults move to the current generation with a 16k output
+  ceiling; pin per-project via `.cladding/config.yaml` `agent.model`.
+- A drift pass loads the spec once instead of once per detector — a
+  5,000-shard gate runs in ~1.4 s (machine-enforced budget).
+
+### Fixed (found by installing 0.6.0 like a real user)
+
+- `clad sync`'s test_ref repair corrupted paths under the real invocation
+  (`cwd='.'`) and looped on its own output — fixed with regression tests that
+  run exactly the real way.
+- The gate no longer auto-installs npm packages: bare `npx tsc` on a
+  toolchain-less machine fetched and executed the typosquat `tsc@2.0.4`.
+  All toolchain calls are `npx --no-install`; an absent tool is an honest
+  skip the demand table escalates.
+- `clad serve`'s banner moved off stdout (the MCP wire) to stderr.
+
+### Deprecated
+
+- `ai_hints.token_budget_per_session` (never had a runtime consumer) — still
+  accepted, no longer written; removal in 0.7.
+
+### Verified
+
+- Real-user battery 31/31 on a tarball install; three-arm hard-task build
+  measured (the full report: `docs/benchmarks/v0.6.0-real-user-verification.md`)
+  — hooks halve the cost of running cladding and produced the only
+  defect-free arm; honest readings included (greenfield conformance remains
+  tied with vanilla; the premium buys traceability and enforcement).
+
+## [0.5.2] — 2026-06-08 — Fixes from installing 0.5.1 like a real user
+
+**In one line:** we installed 0.5.1 the way a new user does — from npm, then through the marketplace
+plugin — and fixed the rough edges that surfaced. The Claude Code plugin now works on its own without a
+separate global install, a green gate no longer hides "your tests never actually ran," and several error
+messages now tell you what to do instead of leaving you to guess. Nothing here changes a green build that was
+already honest; it closes the gaps where green wasn't.
+
+### Added
+
+- **The gate now runs your project's actual entry point.** A new check (`Deliverable smoke`) executes the
+  deliverable you declare in `spec.yaml` (e.g. `./run`, your CLI) once a feature is done, and fails if it
+  crashes — catching the case where the code's own unit tests pass but the *shipped entry point* is broken
+  (because the tests exercise internals and never invoke the entry). It runs only an entry you explicitly mark
+  `is_safe_to_smoke: true`, with a timeout, and never on every commit — so it never auto-runs arbitrary code. A
+  companion detector warns when a finished feature ships code but declares no deliverable to smoke-test. It
+  costs nothing extra (no AI involved) — a cheap floor under the opt-in spec-conformance oracle, which still
+  owns the harder "runs but produces the wrong answer."
+
+### Fixed
+
+- **The Claude Code marketplace plugin now works on its own.** Installing just the plugin used to leave its
+  MCP server dead unless you had *also* run `npm install -g cladding` — the server shelled out to a global
+  `clad` that wasn't there. The plugin now ships the engine inside itself and launches it directly, so it
+  works with nothing else installed. (Codex and Gemini still use the global `clad`; the README now says so
+  plainly.)
+- **A green gate can no longer hide "the tests never ran."** If the test runner wasn't installed, the gate
+  treated the skipped test step as a pass — so a feature marked *done* could be entirely unverified and still
+  go green. Under `--strict`, a *done* feature whose tests did not run now fails, with a message telling you
+  to install the test framework.
+- **A missing scanner is a setup gap, not a fake "secret found."** When the secret or architecture scanner
+  could not run (no config on a fresh project), the gate reported it as if it had *found* a violation. It now
+  correctly says it "couldn't scan" instead of raising a false alarm — and a scanner that genuinely finds
+  something still fails the gate.
+- **Agent personas load on a real install.** The five personas (orchestrator, librarian, reviewer,
+  observability, specialists) failed to resolve when cladding ran from an npm install rather than the source
+  tree; they are now shipped next to the engine and found in every run mode.
+- **Clearer `test_ref` errors.** A test reference that points at a specific test inside a file
+  (`tests/x.test.ts#parses a tag`) now resolves correctly, and when a reference really is broken the message
+  lists the forms it accepts instead of only saying it "resolves to nothing."
+
+### Changed
+
+- **`clad drive` is marked experimental and now fails honestly.** The headless autonomous loop needs an LLM
+  transport that is not built yet, and nothing auto-invokes it — the supported path is host-delegated (your
+  AI tool drives the per-feature cadence). A run that produces only empty stubs now says so and exits non-zero
+  instead of reporting "all work complete," and `clad rollback` makes clear that it prints the git command for
+  you to run rather than executing it itself.
+
+## [0.5.1] — 2026-06-05 — A gate that can catch a hidden bug
+
+**In one line:** until now, `clad check` went green whenever *your code's own tests* passed — even if the
+code didn't actually do what the spec asked. 0.5.1 lets the gate run a second, independent check, written
+from the spec *without looking at the code*, so a green gate can finally mean "this matches the spec," not
+just "the author's own tests passed." It also fixes a harmless-but-alarming error that showed up in *every*
+project, and makes writing specs a little less fiddly. **Everything new here is opt-in** — upgrading changes
+nothing until you turn it on.
+
+### Added
+
+- **An independent "did it really match the spec?" check (opt-in).** The gate can now run a spec-derived
+  test suite that was written without seeing the implementation, and check the code against the *spec*
+  rather than against the author's own assumptions — so a hidden mismatch the author's tests missed turns
+  the gate red. Turn it on per project with `oracle_policy` (off by default). New pieces:
+  `clad oracle` (get the spec-only brief), `clad_author_oracle` (record the result), the `SPEC_CONFORMANCE`
+  gate check, and a 34th drift detector.
+- **Spec mistakes are caught the moment you write them.** Creating a feature now rejects a malformed
+  acceptance criterion right away, instead of letting you find out later when the gate fails.
+- **`clad check --json`** — machine-readable gate results with the exact file, line, and suggested fix for
+  each finding (no more squinting at truncated text).
+- **A place to write down *why* a decision was made.** Record the reasoning behind a non-obvious choice in
+  an acceptance criterion's `notes` (`## Decision` / `## Why` / `## Trade-off`), so a future reader doesn't
+  "fix" it the wrong way. Optional — see `docs/ssot-model.md`.
+
+### Changed
+
+- **Less noise, cheaper turns.** The in-session check returns a short summary by default (full detail on
+  request), the spec context is cached between steps, and the heavy gate runs once per feature (at
+  `clad done`) instead of repeatedly.
+- **You rarely need to run `clad sync` by hand anymore** — creating a feature keeps the inventory current,
+  and `check` / `done` validate on their own.
+
+### Fixed
+
+- **No more false "schema.json not found" error.** Every project was hitting a spurious error about a
+  missing internal file; the gate now simply skips it when absent (it was never actually required).
+- **A broken spec file can no longer slip through green.** A malformed spec shard used to pass the gate
+  silently — it now correctly fails.
+
 ## [0.5.0] — 2026-06-01 — No Vacuous Green: honest gates, the per-feature cadence, and an enforced SSoT
 
 **The theme: a gate that passes must mean the work was actually verified.** This release closes a

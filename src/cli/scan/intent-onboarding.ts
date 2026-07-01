@@ -34,6 +34,7 @@ import {
   renderGreenfieldCapabilitiesYaml,
 } from './greenfield-seeds.js';
 import type {ScanLlmDispatcher} from './llm.js';
+import {canonicalLang, langDisplayName} from './spec-lang.js';
 
 /** Observed environment fed into the LLM prompt alongside the intent. */
 export interface OnboardingObserved {
@@ -153,6 +154,7 @@ export function buildOnboardingPrompt(
   const readmePara = observed.readmeFirstParagraph
     ? `"${observed.readmeFirstParagraph}"`
     : '(none observed)';
+  const canonName = langDisplayName(canonicalLang());
   return [
     'You are a senior software architect setting up a new project workspace',
     'via cladding. The user gave a short description; your job is to produce',
@@ -169,6 +171,13 @@ export function buildOnboardingPrompt(
     '',
     'For the user\'s intent, identify the domain and produce 6 sentinel sections.',
     'Use the EXACT sentinel strings below so the response is parsable.',
+    '',
+    `CANONICAL LANGUAGE: Author ALL sentinel content — PROJECT_CONTEXT_MD prose,`,
+    `CAPABILITIES_YAML titles/summaries, SPEC_SEED_TITLE, SCENARIOS_YAML`,
+    `titles/flows — in ${canonName}, regardless of the intent's language. The`,
+    `canonical spec is read by the model on every session, so it must be`,
+    `${canonName} to stay token-lean. EXCEPTION: write CLARIFYING_QUESTIONS in`,
+    `the user's own language (those are shown back to the user).`,
     '',
     '=== ONBOARDING_MODE ===',
     'One word: greenfield | existing-adoption | mixed. Choose based on',
@@ -213,9 +222,10 @@ export function buildOnboardingPrompt(
     '=== SPEC_SEED_TITLE ===',
     'A single short line: the natural first feature for this kind of',
     'project. NOT a placeholder — pick something the user would actually',
-    'build first (e.g., payment SaaS → "결제 인증 흐름"; ML pipeline →',
-    '"데이터 수집 파이프라인"; marketing site → "랜딩 페이지 렌더링").',
-    'Match the user\'s language (Korean intent → Korean title).',
+    'build first (e.g., payment SaaS → "Payment authentication flow"; ML',
+    'pipeline → "Data ingestion pipeline"; marketing site → "Landing page',
+    'rendering").',
+    `Write the title in ${canonName} (see CANONICAL LANGUAGE above).`,
     '',
     '=== SCENARIOS_YAML ===',
     '1-3 user-journey scenarios that this project enables. Each scenario',
@@ -237,7 +247,7 @@ export function buildOnboardingPrompt(
     '  flow", "settlement flow". NOT "auth layer", "ledger layer".',
     '- 1-3 scenarios is the sweet spot. More than 3 → those become',
     '  follow-up scenarios in a later cycle.',
-    '- Match the user\'s language (Korean intent → Korean title + flow).',
+    `- Write titles + flow prose in ${canonName} (see CANONICAL LANGUAGE above).`,
     '- The `flow` prose IS the user-journey summary that lives in',
     '  project-context.md; the same paragraph can appear in both, just',
     '  structured here for scenario-aware tooling.',
@@ -245,8 +255,7 @@ export function buildOnboardingPrompt(
     '=== PROJECT_METADATA ===',
     'AI behavior hints inferred from the intent. YAML with these optional',
     'keys (omit any you cannot confidently infer):',
-    '  preferred_persona: <software-engineer | specialist | reviewer | librarian | observability>',
-    '  token_budget_per_session: <integer · default 4000>',
+    '  preferred_persona: <planner | developer | reviewer | observability | orchestrator>',
     '  test_framework: <vitest | jest | pytest | cargo-test | …>',
     '  primary_branch: <develop | main>',
     '  forbidden_patterns: ["eval(", "innerHTML", ...]  # identifier substrings the AI should refuse', // cladding-disable AI_HINTS_FORBIDDEN_PATTERN
@@ -730,6 +739,7 @@ export function buildRefinementPrompt(
   const qaBlock = qaHistory
     .map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`)
     .join('\n');
+  const canonName = langDisplayName(canonicalLang());
   return [
     'You are a senior software architect refining a project workspace via',
     'cladding. The user has answered a clarifying question; update the',
@@ -765,6 +775,10 @@ export function buildRefinementPrompt(
     'Emit the same 7 sentinel sections as the original onboarding pass.',
     'Re-emit refined bodies — do not produce a diff or summary. Each',
     'sentinel section must contain the complete new body for that artifact.',
+    '',
+    `CANONICAL LANGUAGE: Author all sentinel content in ${canonName} regardless`,
+    `of the intent's language; the canonical spec is read by the model on every`,
+    `session. EXCEPTION: write CLARIFYING_QUESTIONS in the user's own language.`,
     '',
     '=== ONBOARDING_MODE ===',
     'Same options: greenfield | existing-adoption | mixed.',

@@ -13,18 +13,61 @@ import {globSync} from 'tinyglobby';
 
 import type {Spec} from '../../spec/types.js';
 import type {CommandStageOptions, DriftDetector, DriftFinding} from '../types.js';
+import {normalizeArchitecture} from './architecture-from-spec.js';
 import {withSpec} from './with-spec.js';
 
 const NAME = 'UNMAPPED_ARTIFACT';
 
 /**
- * Directories cladding scans for "real" source files when looking for
- * artifacts not claimed by any feature. This list mirrors the
- * `tsconfig.include` patterns; it is intentionally narrow so test
- * fixtures, generated files, and tooling configs don't appear as
- * findings.
+ * Legacy fallback scan roots — used only when the spec declares no
+ * architecture layers (F-aee61f). Intentionally narrow so spec-less and
+ * early projects see no findings from directories they never declared.
  */
-const SCAN_PATTERNS: readonly string[] = ['src/stages/**/*.ts', 'src/spec/**/*.ts'];
+const LEGACY_SCAN_PATTERNS: readonly string[] = ['src/stages/**/*.ts', 'src/spec/**/*.ts'];
+
+const EXT_BY_LANGUAGE: Record<string, string> = {
+  typescript: 'ts',
+  javascript: 'js',
+  python: 'py',
+  rust: 'rs',
+  go: 'go',
+  kotlin: 'kt',
+};
+
+/**
+ * Layer-scan root per language. Defaults to `src` (where the other
+ * languages keep their layer dirs); Kotlin nests its layers under the
+ * Gradle/Maven `src/main/kotlin` source set.
+ */
+const ROOT_BY_LANGUAGE: Record<string, string> = {
+  kotlin: 'src/main/kotlin',
+};
+
+/**
+ * F-aee61f — the scan universe derives from the DECLARED architecture: one
+ * `src/<layer>/**` pattern per layer (both string-tier and {name} object
+ * forms), extension from project.language. Before this, two hardcoded
+ * directories left the module→feature honesty check blind to 13 of
+ * cladding's own 15 src/ directories — a confidently wrong map is worse
+ * than none. No architecture declared → legacy narrow fallback.
+ * Exported for tests.
+ */
+const MIN_FEATURES_FOR_FULL_SCAN = 8; // same scale-gate idiom as HOLLOW_GOVERNANCE et al.
+
+export function scanPatterns(spec: Spec): readonly string[] {
+  // Scale-gated (F-aee61f): a fresh adoption legitimately has scan-derived
+  // architecture layers but features accumulating on demand — instantly
+  // flagging every not-yet-claimed file would wall off day-1 adoption (the
+  // false-RED class the 0.6 design review warned about). Once the project
+  // is grown (≥8 features), an unclaimed file in a declared layer is drift.
+  if ((spec.features ?? []).length < MIN_FEATURES_FOR_FULL_SCAN) return LEGACY_SCAN_PATTERNS;
+  const {layers} = normalizeArchitecture(spec.architecture ?? {});
+  if (layers.size === 0) return LEGACY_SCAN_PATTERNS;
+  const language = spec.project?.language ?? '';
+  const ext = EXT_BY_LANGUAGE[language] ?? 'ts';
+  const root = ROOT_BY_LANGUAGE[language] ?? 'src';
+  return [...layers].sort().map((l) => `${root}/${l}/**/*.${ext}`);
+}
 
 /**
  * Finds source files not referenced by any `features[].modules`.
@@ -49,7 +92,7 @@ function detect(spec: Spec, cwd: string): readonly DriftFinding[] {
     for (const modulePath of feature.modules ?? []) claimed.add(modulePath);
   }
 
-  const files = globSync([...SCAN_PATTERNS], {cwd, dot: false});
+  const files = globSync([...scanPatterns(spec)], {cwd, dot: false});
   const findings: DriftFinding[] = [];
   for (const file of files) {
     if (claimed.has(file)) continue;

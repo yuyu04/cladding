@@ -10,11 +10,11 @@ When adding a new spec entry to `spec/features/` or `spec/scenarios/`:
 
 - **DO NOT** create `spec/features/F-NNN.yaml` (the legacy sequential format) by hand.
 - **DO** use the hash-based model:
-  - Filename: `<slug>-<hash6>.yaml` (e.g. `auth-bypass-c4d108.yaml`)
-  - Inside the yaml: `id: F-<hash6>` plus `slug: <slug>`
-  - The hash should be a 6-character hex string. Generate with:
+  - Filename: `<slug>-<hash>.yaml` (e.g. `auth-bypass-c4d108e9.yaml`)
+  - Inside the yaml: `id: F-<hash>` plus `slug: <slug>`
+  - The hash is an 8-character hex string since 0.6.0 (legacy 6-char ids stay valid). Generate with:
     ```bash
-    node -e "console.log('F-' + require('node:crypto').randomBytes(3).toString('hex'))"
+    node -e "console.log('F-' + require('node:crypto').randomBytes(4).toString('hex'))"
     ```
 
 This rule exists because v0.3.9 introduced the multi-developer-safe hash model and external users get hash-based IDs whenever they invoke `clad_create_feature` via their host AI. Cladding's own spec must dogfood the same model — otherwise the reference implementation drifts from what the standard recommends.
@@ -47,9 +47,9 @@ When you add a drift detector under `src/stages/detectors/`:
 A user-explicit instruction ("release vX.Y.Z") triggers the ritual:
 
 1. `npm run version-bump -- X.Y.Z` (all nine sites) + `npm install` (refresh the committed `package-lock.json` to the new version — CI's `npm ci` fails on a stale lock) + `npm run build` + GREEN `npm test` / `clad check --strict`
-2. develop → main fast-forward
-3. `git tag vX.Y.Z`
-4. push main + tag
+2. open a **PR `develop → main`** and merge it with the GitHub **"Create a merge commit"** button — NEVER squash, NEVER rebase (see the squash-ban below)
+3. `git tag vX.Y.Z` on main's merge commit
+4. push main + tag, then **back-merge `main → develop`** (`git checkout develop && git merge origin/main && git push`) so develop keeps the release commit in its ancestry — skip this and the next release PR phantom-conflicts
 5. **`npm publish`** — existing users install the engine via the global npm `clad`, so a tag + `gh release` alone does NOT reach them; the registry must carry the new version or they stay frozen on the old one. (`prepublishOnly` rebuilds dist + mirrors first, so the tarball is never stale.)
 6. `gh release create vX.Y.Z --notes-file <CHANGELOG section>`
 
@@ -57,11 +57,13 @@ The marketplace plugin (Claude Code / Codex / Gemini) ships only the prompts + t
 
 Never auto-tag, auto-publish, or auto-release. Patch-first cadence — minor bumps (0.4.0 etc.) need explicit user confirmation.
 
+**All merges go through a PR — git-flow, always.** `feature/* → develop` and `develop → main` both land via PR; no direct pushes that bypass review. For `develop → main`, **always use a merge commit — NEVER squash, NEVER rebase.** A squash puts the release commit outside develop's ancestry, so the *next* release PR reports every file touched since as conflicting (the v0.5.2 squash via PR #180 made PR #181 show 31 phantom conflicts; #183's squash left develop unreconciled until a manual `merge origin/main` reconciliation on 2026-06-25). GitHub has no per-branch merge-method lock, so this is a hand-enforced convention: deliberately pick "Create a merge commit" on every `develop → main` PR, then back-merge `main → develop` (step 4) to keep develop a clean superset. Squashing `feature/* → develop` PRs is fine — only the `develop → main` direction causes the divergence.
+
 ## AI behavior guidance from `spec.yaml.project.ai_hints`
 
 When operating inside a cladding-managed project (cladding itself included), grep `spec.yaml::project.ai_hints` at session start. It is the SSoT for AI behavior policy:
 
-- **`preferred_persona`** — which persona prompt to default to (`software-engineer`, `librarian`, `reviewer`, `observability`, `orchestrator`)
+- **`preferred_persona`** — which persona prompt to default to (`planner`, `developer`, `reviewer`, `observability`, `orchestrator`)
 - **`token_budget_per_session`** — soft cap on session size
 - **`test_framework`, `primary_branch`** — operational defaults (e.g. `vitest`, `develop`)
 - **`forbidden_patterns`** — identifier substrings you must NOT introduce (detector `AI_HINTS_FORBIDDEN_PATTERN` #27 enforces; `clad check --strict` will block)
@@ -72,7 +74,7 @@ Together with `docs/conventions.md` (style observed from code) and `docs/project
 | Tier | File | Source | Refresh by |
 |---|---|---|---|
 | B | `spec.yaml::project.ai_hints` | LLM via `clad init --intent` OR user-authored | manual edit; `clad sync` validates |
-| B | `docs/project-context.md` | LLM via onboarding OR user-authored | `clad init`, `clad refine` |
+| B | `docs/project-context.md` | LLM via onboarding OR user-authored | `clad init`, `clad clarify` |
 | C | `docs/conventions.md` | derived from code | `clad init --scan` |
 
 When `ai_hints` conflicts with `CLAUDE.md` for cladding-self specifically, **`ai_hints` wins** (it's the project-scoped SSoT; CLAUDE.md is the meta-instruction layer).
@@ -92,8 +94,8 @@ This project is managed by **cladding** (Spec-Anchored Agent Harness).
 satisfy the relevant `features[]` and `acceptance_criteria`. Run
 `clad check --strict` before commit.
 
-**Persona separation** — librarian writes spec, reviewer audits,
-specialists implement. The agent that authors must not sign off on its
+**Persona separation** — planner writes spec, reviewer audits,
+developer implements. The agent that authors must not sign off on its
 own work (anti-self-cert invariant).
 
 **Feature cycle — one at a time** — Work ONE feature end-to-end before

@@ -18,8 +18,10 @@
 // @see src/cli/serve.ts — stdio process entry point.
 // @see spec/features/F-073.yaml — server scaffold AC matrix.
 
+import {spawnSync} from 'node:child_process';
 import {readFileSync, existsSync, statSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -29,22 +31,40 @@ import {
 import {z} from 'zod';
 
 import {loadPersona} from '../agents/loader.js';
+import {collectChangelog, defaultSinceRef} from '../changelog/collect.js';
+import {renderAuditTable, renderCatalog, renderChangelogMarkdown} from '../changelog/render.js';
 import {subscribeAudit} from '../hitl/audit.js';
 import {loadSpec} from '../spec/load.js';
 import type {Spec} from '../spec/types.js';
 import {createFeature, createScenario, linkCapability} from '../spec/new.js';
 import {recordOracle} from '../oracle/record.js';
-import {computeInventory, writeInventoryToSpecYaml} from '../spec/inventory.js';
+import {doneFeatureCount, oracleRequired, resolveOraclePolicy} from '../oracle/policy.js';
+import {maintainDeliverable} from '../spec/deliverable-detect.js';
+import {computeInventory, writeInventoryToSpecYaml, writeFeatureIndex} from '../spec/inventory.js';
+import {buildContextSlice} from '../optimizer/context-slice.js';
+import {buildImpactSlice} from '../optimizer/reverse-slice.js';
+import {buildWorkingSet} from '../optimizer/working-set.js';
+import {buildGraph, resolveNodeId, subgraph} from '../graph/model.js';
 import {runDrift} from '../stages/drift.js';
 
 /** Persona ids registered as MCP prompts (mirrors src/agents/). */
 export const PERSONA_IDS = [
   'orchestrator',
-  'librarian',
+  'planner',
   'reviewer',
   'observability',
-  'specialists',
+  'developer',
 ] as const;
+
+/**
+ * 0.6.0 persona renames (docs/glossary.md). The old prompt names stay
+ * registered as aliases serving the NEW persona body — hosts may have cached
+ * the prompt names — and are removed in 0.7.
+ */
+export const PERSONA_PROMPT_ALIASES: Readonly<Record<string, string>> = {
+  librarian: 'planner',
+  specialists: 'developer',
+};
 
 /** Tool names cladding's MCP server exposes (stable wire identifiers). */
 export const TOOL_NAMES = [
@@ -56,6 +76,12 @@ export const TOOL_NAMES = [
   'clad_create_scenario',
   'clad_link_capability',
   'clad_author_oracle',
+  'clad_run_gate',
+  'clad_get_context',
+  'clad_get_working_set',
+  'clad_get_impact',
+  'clad_get_graph',
+  'clad_changelog',
 ] as const;
 
 /** Resource URIs cladding's MCP server exposes (stable wire identifiers). */
@@ -89,7 +115,7 @@ export function buildServer(opts: ServerOptions = {}): McpServer {
   const server = new McpServer(
     {
       name: opts.name ?? 'cladding',
-      version: opts.version ?? '0.5.0',
+      version: opts.version ?? '0.7.0',
     },
     {
       // Declare subscribe support so clients can subscribe to
@@ -170,6 +196,43 @@ function loadSpecOrError(cwd: string): {readonly spec: Spec} | {readonly error: 
       error: `cladding: spec not loaded — ${(err as Error).message}. Run \`clad init\` to scaffold spec.yaml first.`,
     };
   }
+}
+
+/** Frozen wire field (F-570a3f): bump when a tool's payload shape changes. */
+const PAYLOAD_SCHEMA_VERSION = 1;
+
+/**
+ * F-570a3f — the gate state rides every mutating tool result as a JSON field
+ * (the withHint pattern; never appended text). Tool results are the one
+ * channel the model cannot not see, on every host — and Gemini/Codex have no
+ * lifecycle hooks, so this is their only structural enforcement channel.
+ */
+function gateFooter(cwd: string): {pass: boolean; findings: ReadonlyArray<{detector?: string; severity: string; message: string}>; next?: string} {
+  try {
+    const report = runDrift({cwd});
+    const findings = report.findings
+      .filter((f) => f.severity !== 'info')
+      .slice(0, 3)
+      .map((f) => ({detector: f.detector, severity: f.severity, message: f.message.slice(0, 220)}));
+    return report.pass
+      ? {pass: true, findings}
+      : {pass: false, findings, next: 'Resolve these findings, then verify with clad_run_gate (or `clad check --strict`) before `clad done`.'};
+  } catch {
+    return {pass: true, findings: []};
+  }
+}
+
+
+/** Locate the engine's bin shim relative to this module — works in the dist
+ * bundle (dist/clad.js → ../bin/clad) and the dev tree (src/serve/ → ../../bin/clad). */
+function engineShim(): string | null {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 5; i++) {
+    const candidate = join(dir, 'bin', 'clad');
+    if (existsSync(candidate)) return candidate;
+    dir = dirname(dir);
+  }
+  return null;
 }
 
 function registerTools(server: McpServer, cwd: string): void {
@@ -314,6 +377,290 @@ function registerTools(server: McpServer, cwd: string): void {
     },
   );
 
+  // clad_run_gate (F-570a3f) — run the REAL Iron Law pipeline in-session.
+  // Before this, the MCP surface could only run the drift detectors: an
+  // agent driving cladding through MCP never executed a single test. The
+  // gate runs via the engine's own bin shim in a subprocess — the serve
+  // layer must not import the cli layer (topology: cli → serve, never the
+  // reverse), and a separate process gives the same pipeline `clad check`
+  // and `clad done` use, byte-identical JSON included.
+  server.registerTool(
+    'clad_run_gate',
+    {
+      title: 'Run the full Iron Law gate',
+      description:
+        'Runs the real `clad check` pipeline for a tier (default pre-commit for latency; pre-push runs ' +
+        'type/lint/tests/coverage/conformance/smoke) and returns the untruncated JSON outcome. Strict by default — ' +
+        'this is the verification surface; use clad_run_check for the cheap drift-only view.',
+      inputSchema: {
+        tier: z.enum(['pre-commit', 'pre-push', 'all']).optional().describe('Stage tier (default pre-commit)'),
+        strict: z.boolean().optional().describe('Promote warn findings to blocking (default true)'),
+      },
+    },
+    async (args) => {
+      const shim = engineShim();
+      if (!shim) {
+        return {
+          isError: true,
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, error: 'cladding engine shim (bin/clad) not found relative to the running server'})}],
+        };
+      }
+      const tier = args.tier ?? 'pre-commit';
+      const strict = args.strict !== false;
+      const res = spawnSync(shim, ['check', `--tier=${tier}`, ...(strict ? ['--strict'] : []), '--json'], {
+        cwd,
+        encoding: 'utf8',
+        timeout: 300_000,
+      });
+      try {
+        const doc = JSON.parse(res.stdout || '') as {worst?: number};
+        return {
+          isError: (doc.worst ?? 1) !== 0,
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...doc}, null, 2)}],
+        };
+      } catch {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                schema_version: PAYLOAD_SCHEMA_VERSION,
+                error: 'gate produced no parseable JSON',
+                stderr: (res.stderr ?? '').slice(0, 400),
+              }),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // clad_get_context (F-d2c806) — the Least Context principle, mechanized.
+  server.registerTool(
+    'clad_get_context',
+    {
+      title: 'Get the context slice for one feature',
+      description:
+        "Returns the working set for ONE feature in one call: the focus feature (full), its transitive " +
+        'depends_on ancestors (title+status), bound scenarios, the matching ai_hints patterns, and the union ' +
+        "of the feature's test_refs. Look up by feature id (F-…), slug, or a module path. Prefer this over " +
+        'reading shards by hand — dispatch the slice, never the whole spec.',
+      inputSchema: {
+        query: z.string().describe('Feature id (F-…), slug, or module path (e.g. src/auth/login.ts)'),
+      },
+    },
+    async (args) => {
+      try {
+        const spec = loadSpec(cwd);
+        const slice = buildContextSlice(spec, args.query);
+        const miss = 'not_found' in slice;
+        return {
+          isError: miss,
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...slice}, null, 2)}],
+        };
+      } catch (err) {
+        return {isError: true, content: [{type: 'text', text: (err as Error).message}]};
+      }
+    },
+  );
+
+  // clad_get_working_set (F-06dfdad6) — the code-bearing, token-budgeted superset of
+  // clad_get_context: focus + module CODE + forward needs + backward breaks + verify + budget,
+  // fused in one call. clad_get_context stays frozen for hosts that cache its shape.
+  server.registerTool(
+    'clad_get_working_set',
+    {
+      title: 'Get the token-budgeted working set for one feature (code + needs + breaks)',
+      description:
+        'Returns ONE token-budgeted working set for a feature/module: must_edit (focus + full ACs + the ACTUAL ' +
+        'source code of its modules), needs (forward depends_on), breaks_if_changed (direct dependents + the ' +
+        'regression test set), verify (scenarios + tests + oracle_refs + EARS unwanted/state high-risk ACs), ' +
+        'guidance (ai_hints), and budget (what was clipped to fit). One call replaces reading the shard + opening ' +
+        'each module file + grepping deps/tests. Look up by feature id (F-…), slug, or module path.',
+      inputSchema: {
+        query: z.string().describe('Feature id (F-…), slug, or module path (e.g. src/auth/login.ts)'),
+        max_tokens: z
+          .number()
+          .int()
+          .positive()
+          .max(20000)
+          .optional()
+          .describe('Token budget for the payload (default 3000); distant deps then code then tests are clipped to fit'),
+      },
+    },
+    async (args) => {
+      try {
+        const ws = buildWorkingSet(loadSpec(cwd), args.query, {cwd, maxTokens: args.max_tokens});
+        return {
+          isError: 'not_found' in ws,
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...ws}, null, 2)}],
+        };
+      } catch (err) {
+        return {isError: true, content: [{type: 'text', text: (err as Error).message}]};
+      }
+    },
+  );
+
+  // clad_get_impact (F-7794a6bc) — the backward complement of clad_get_context.
+  // "What breaks if I change this?" Walks the reverse-index dependents and
+  // returns the blast radius: impacted features, scenarios at risk, the
+  // regression test set to run, and the modules in the radius.
+  server.registerTool(
+    'clad_get_impact',
+    {
+      title: 'Get the blast radius for a change (reverse / impact slice)',
+      description:
+        "Returns what a change to ONE feature or file could break: the transitive dependents (id+title+status), " +
+        'the scenarios bound to any of them, the deduped union of their test_refs (the regression set to re-run), ' +
+        'and the modules in the radius. Look up by feature id (F-…), slug, or a module path — a module fans out to ' +
+        'ALL features that touch it. The backward complement of clad_get_context: forward = what this needs, ' +
+        'impact = what depends on this. Prefer this over grepping to scope a safe refactor.',
+      inputSchema: {
+        query: z.string().describe('Feature id (F-…), slug, or module path (e.g. src/spec/load.ts)'),
+        max_depth: z
+          .number()
+          .int()
+          .positive()
+          .max(6)
+          .optional()
+          .describe('Bound the dependent walk to N hops (default: unbounded — the full transitive radius)'),
+      },
+    },
+    async (args) => {
+      try {
+        const spec = loadSpec(cwd);
+        const slice = buildImpactSlice(spec, args.query, {depth: args.max_depth});
+        const miss = 'not_found' in slice;
+        return {
+          isError: miss,
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...slice}, null, 2)}],
+        };
+      } catch (err) {
+        return {isError: true, content: [{type: 'text', text: (err as Error).message}]};
+      }
+    },
+  );
+
+  // clad_get_graph (F-64a5c159) — the live spec↔code↔doc knowledge graph (or a
+  // focused neighborhood). Always recomputed from the current spec, so the graph
+  // an agent reads is never stale. Companion to the `clad graph serve` live view.
+  server.registerTool(
+    'clad_get_graph',
+    {
+      title: 'Get the live knowledge graph (nodes + edges)',
+      description:
+        'Returns the current spec↔code↔doc knowledge graph: nodes (feature/module/skill/test/scenario/capability/doc, ' +
+        'tier-classified A/B/C/D, features labeled by slug) + typed edges (depends_on/touches/covers/binds/' +
+        'implements/references/links). Optionally focus on one node’s N-hop neighborhood. Recomputed live — never stale.',
+      inputSchema: {
+        query: z
+          .string()
+          .optional()
+          .describe('Focus node: feature id (F-…), slug, or module path. Omit for the whole graph.'),
+        max_depth: z
+          .number()
+          .int()
+          .positive()
+          .max(6)
+          .optional()
+          .describe('Neighborhood radius around the focus node (default: full graph from the focus)'),
+      },
+    },
+    async (args) => {
+      try {
+        const spec = loadSpec(cwd);
+        let graph = buildGraph(spec, cwd);
+        if (args.query) {
+          const focusId = resolveNodeId(spec, graph, args.query);
+          if (!focusId) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      schema_version: PAYLOAD_SCHEMA_VERSION,
+                      not_found: args.query,
+                      accepted_forms: ['feature id (F-…)', 'slug', 'module path'],
+                    },
+                    null,
+                    2,
+                  ),
+                },
+              ],
+            };
+          }
+          graph = subgraph(graph, focusId, args.max_depth ?? Infinity);
+        }
+        return {
+          content: [
+            {type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...graph}, null, 2)},
+          ],
+        };
+      } catch (err) {
+        return {isError: true, content: [{type: 'text', text: (err as Error).message}]};
+      }
+    },
+  );
+
+  // clad_changelog (F-904495a5) — the spec rendered into a shipped-changes
+  // manifest. The deterministic collector/renderers live in src/changelog/;
+  // the LLM host renders the human prose FROM the manifest, never from memory.
+  server.registerTool(
+    'clad_changelog',
+    {
+      title: 'Collect shipped changes since a git ref (changelog manifest)',
+      description:
+        'Returns the deterministic shipped-changes manifest for <since>..HEAD (default since: the latest tag): ' +
+        'feature shards classified (added-as-done / flipped-to-done / modified-while-done / archived) grouped by ' +
+        'capability with an uncategorized bucket, the spec inventory count diff, and conventional feat:/fix: ' +
+        "commits that name no feature id (work that shipped outside the spec). For HUMAN-FACING release notes, " +
+        "render from the manifest in the project's language(s), sourcing every claim from a feature title or " +
+        "acceptance-criterion sentence — never invent a change the manifest does not carry. format:'markdown' is " +
+        "the deterministic English fallback (no internal ids), 'audit' the id-keeping verification table " +
+        "(refs marked resolved ✓/✗), 'catalog' the full capability → feature → acceptance listing (no git range).",
+      inputSchema: {
+        since: z
+          .string()
+          .optional()
+          .describe('Git ref to diff from (default: latest tag via `git describe --tags --abbrev=0`)'),
+        format: z
+          .enum(['manifest', 'markdown', 'catalog', 'audit'])
+          .optional()
+          .describe("Payload format (default 'manifest')"),
+      },
+    },
+    async (args) => {
+      try {
+        const format = args.format ?? 'manifest';
+        if (format === 'catalog') {
+          const content = renderCatalog(loadSpec(cwd));
+          return {
+            content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, format, content}, null, 2)}],
+          };
+        }
+        const since = args.since ?? defaultSinceRef(cwd);
+        const manifest = collectChangelog(cwd, since);
+        if (format === 'manifest') {
+          return {
+            content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...manifest}, null, 2)}],
+          };
+        }
+        const content =
+          format === 'audit'
+            ? renderAuditTable(manifest, loadSpec(cwd), cwd)
+            : renderChangelogMarkdown(manifest);
+        return {
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, format, content}, null, 2)}],
+        };
+      } catch (err) {
+        return {isError: true, content: [{type: 'text', text: (err as Error).message}]};
+      }
+    },
+  );
+
   // clad_get_events — return the last N events from .cladding/events.log.
   server.registerTool(
     'clad_get_events',
@@ -381,7 +728,7 @@ function registerTools(server: McpServer, cwd: string): void {
         acceptance_criteria: z
           .array(
             z.object({
-              ears: z.enum(['ubiquitous', 'event', 'state', 'optional', 'unwanted']).optional(),
+              ears: z.enum(['ubiquitous', 'event', 'state', 'optional', 'unwanted', 'complex']).optional(),
               text: z.string().optional().describe('The "The system shall …" statement.'),
               action: z.string().optional(),
               response: z.string().optional(),
@@ -412,7 +759,9 @@ function registerTools(server: McpServer, cwd: string): void {
         // Non-mutating firing-path nudge: travels as a `hint` FIELD (keeps the
         // payload valid JSON), never a silent write to capabilities.yaml.
         const withHint = {
+          schema_version: PAYLOAD_SCHEMA_VERSION,
           ...result,
+          gate: gateFooter(cwd),
           hint:
             'If this feature is user-facing, link it to a capability with clad_link_capability ' +
             `(capability: <kebab-id>, feature: ${result.id}) so the Tier-B design SSoT grows with ` +
@@ -441,7 +790,7 @@ function registerTools(server: McpServer, cwd: string): void {
       description:
         'Records a host-authored conformance oracle for a feature AC + its impl-blind PROVENANCE, writes the test ' +
         'under tests/oracle/, and stamps oracle_refs so the SPEC_CONFORMANCE gate verifies it. cladding does NOT ' +
-        'author the oracle. FIRST run `clad oracle <featureId> --ac <acId>` for the spec-only brief; spawn a FRESH ' +
+        'author the oracle. AUTHOR ONLY ACs on the policy worklist (`clad oracle --required`) — an empty worklist means do not author unless the user explicitly asks (out-of-policy recordings are labeled voluntary). FIRST run `clad oracle <featureId> --ac <acId>` for the spec-only brief; spawn a FRESH ' +
         'sub-agent given ONLY that brief (never the implementation); have it write the test; then call this with the ' +
         'body + the manifest of exactly what the sub-agent saw. Blindness is your discipline — the gate audits the ' +
         'manifest (manifest∩modules must be empty) and the author≠implementer identity, and records whether you ' +
@@ -469,7 +818,28 @@ function registerTools(server: McpServer, cwd: string): void {
           cwd,
         });
         syncInventory(cwd);
-        return {content: [{type: 'text', text: JSON.stringify(result, null, 2)}], isError: !result.ok};
+        // F-551a1c — the policy must bind BEHAVIOR, not just the gate: the
+        // 0.6.0 A/B measured 42-52% of output tokens going to VOLUNTARY
+        // exhaustive authoring under a no-mandate policy. Out-of-policy
+        // recording stays allowed (extra verification is never forbidden) but
+        // is labeled, so the spend is informed.
+        let voluntary: {voluntary: true; cost_note: string} | Record<string, never> = {};
+        try {
+          const spec = loadSpec(cwd);
+          const policy = resolveOraclePolicy(spec.project, doneFeatureCount(spec));
+          const feature = spec.features.find((f) => f.id === args.featureId);
+          const ac = feature?.acceptance_criteria?.find((a) => a.id === args.acId);
+          if (!ac || !oracleRequired(policy, args.featureId, ac)) {
+            voluntary = {
+              voluntary: true,
+              cost_note:
+                "this AC is not on the project's oracle worklist (`clad oracle --required`) — recording anyway as voluntary; prefer policy-listed ACs to keep token spend inside the declared verification budget.",
+            };
+          }
+        } catch {
+          /* unreadable spec → skip the label, never the recording */
+        }
+        return {content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...result, ...voluntary, gate: gateFooter(cwd)}, null, 2)}], isError: !result.ok};
       } catch (err) {
         return {isError: true, content: [{type: 'text', text: (err as Error).message}]};
       }
@@ -514,7 +884,7 @@ function registerTools(server: McpServer, cwd: string): void {
         });
         syncInventory(cwd);
         return {
-          content: [{type: 'text', text: JSON.stringify(result, null, 2)}],
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...result, gate: gateFooter(cwd)}, null, 2)}],
         };
       } catch (err) {
         return {
@@ -568,7 +938,7 @@ function registerTools(server: McpServer, cwd: string): void {
         });
         syncInventory(cwd);
         return {
-          content: [{type: 'text', text: JSON.stringify(result, null, 2)}],
+          content: [{type: 'text', text: JSON.stringify({schema_version: PAYLOAD_SCHEMA_VERSION, ...result, gate: gateFooter(cwd)}, null, 2)}],
         };
       } catch (err) {
         return {
@@ -591,6 +961,11 @@ function syncInventory(cwd: string): void {
   try {
     if (existsSync(join(cwd, 'spec.yaml'))) {
       writeInventoryToSpecYaml(cwd, computeInventory(cwd));
+      writeFeatureIndex(cwd); // F-37b4a8
+      // v0.5.x — when a CLI entry now exists but no deliverable is declared, auto-populate it
+      // (calibrated to pass now) so DELIVERABLE_SMOKE engages BEFORE the agent reacts to the
+      // INTEGRITY warn and declares it disabled. One-time (skips once present).
+      maintainDeliverable(cwd);
     }
   } catch {
     // intentional no-op — inventory sync is a convenience, not a gate.
@@ -708,12 +1083,12 @@ function registerResources(server: McpServer, cwd: string): void {
 }
 
 function registerPrompts(server: McpServer, cwd: string): void {
-  for (const id of PERSONA_IDS) {
+  const register = (promptName: string, personaId: string, description: string): void => {
     server.registerPrompt(
-      id,
+      promptName,
       {
-        title: `Cladding persona — ${id}`,
-        description: `Persona prompt body for the ${id} agent.`,
+        title: `Cladding persona — ${personaId}`,
+        description,
         argsSchema: {
           featureId: z
             .string()
@@ -722,7 +1097,7 @@ function registerPrompts(server: McpServer, cwd: string): void {
         },
       },
       (args) => {
-        const persona = loadPersona(id);
+        const persona = loadPersona(personaId);
         const featureLine = args.featureId ? `\nActive feature: ${args.featureId}\n` : '';
         return {
           messages: [
@@ -736,6 +1111,18 @@ function registerPrompts(server: McpServer, cwd: string): void {
           ],
         };
       },
+    );
+  };
+  for (const id of PERSONA_IDS) {
+    register(id, id, `Persona prompt body for the ${id} agent.`);
+  }
+  // 0.6.0 alias prompts — old names serve the renamed persona's body so hosts
+  // with cached prompt names keep working for one release; removed in 0.7.
+  for (const [oldName, newId] of Object.entries(PERSONA_PROMPT_ALIASES)) {
+    register(
+      oldName,
+      newId,
+      `Persona prompt body for the ${newId} agent. (Renamed: '${oldName}' is now '${newId}' in 0.6.0 — this alias is removed in 0.7.)`,
     );
   }
   // Suppress the unused-cwd lint — cwd is reserved for future

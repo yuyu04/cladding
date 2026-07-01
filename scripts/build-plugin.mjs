@@ -26,7 +26,17 @@
 //
 // Run: `npm run build:plugin` or as part of `npm run build`.
 
-import {copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {parse as parseYaml} from 'yaml';
@@ -42,14 +52,21 @@ const CLAUDE_PLUGIN_JSON = `${CLAUDE_PLUGIN_DIR}/.claude-plugin/plugin.json`;
 const CLAUDE_AGENTS = `${CLAUDE_PLUGIN_DIR}/agents`;
 mkdirSync(CLAUDE_AGENTS, {recursive: true});
 
+// Canonical persona file list — used to copy AND to sweep stale mirror files
+// from earlier builds (e.g. the pre-0.6.0 `librarian.md` / `specialists.md`,
+// renamed to planner/developer). A mirror must track src/agents exactly.
+const personaFiles = readdirSync(SRC_AGENTS).filter(
+  (f) => f.endsWith('.md') && f !== 'README.md' && statSync(join(SRC_AGENTS, f)).isFile(),
+);
+
 const claudeGenerated = [];
-for (const entry of readdirSync(SRC_AGENTS)) {
-  if (!entry.endsWith('.md')) continue;
-  if (entry === 'README.md') continue;
-  const src = join(SRC_AGENTS, entry);
-  if (!statSync(src).isFile()) continue;
-  copyFileSync(src, join(CLAUDE_AGENTS, entry));
+for (const entry of personaFiles) {
+  copyFileSync(join(SRC_AGENTS, entry), join(CLAUDE_AGENTS, entry));
   claudeGenerated.push(entry);
+}
+for (const file of readdirSync(CLAUDE_AGENTS)) {
+  if (!file.endsWith('.md') || file === 'README.md') continue;
+  if (!personaFiles.includes(file)) rmSync(join(CLAUDE_AGENTS, file));
 }
 writeFileSync(
   join(CLAUDE_AGENTS, 'README.md'),
@@ -87,6 +104,68 @@ try {
   // skills/init/SKILL.md missing — leave the commands dir untouched and log
   // a warning so the build still completes for partial source trees.
   console.warn(`cladding plugin · claude-code: ${initSkill} not found — slash command skipped`);
+}
+
+// --- Phase A2 — Claude Code self-contained engine (v0.5.2) ------------
+//
+// The marketplace plugin is git-distributed (marketplace.json
+// `source: "./plugins/claude-code"`), so for its MCP server to launch
+// WITHOUT a global `clad` on PATH we ship the built engine alongside it.
+// plugin.json wires `command: node, args: [${CLAUDE_PLUGIN_ROOT}/dist/clad.js,
+// serve]` (inline mcpServers — the reliable spot for ${CLAUDE_PLUGIN_ROOT}
+// expansion, side-stepping the .mcp.json expansion bug, claude-code#9427).
+//
+// build.mjs runs before this script under `npm run build`, so dist/clad.js +
+// dist/schema.json + dist/agents/ already exist. The bundle is committed
+// (same model as the agent mirrors above) because the git source IS what users
+// install. Only the Claude Code lane is bundled — Codex/Gemini do not expand
+// ${CLAUDE_PLUGIN_ROOT}, so they keep the global `clad` command.
+const CLAUDE_DIST = `${CLAUDE_PLUGIN_DIR}/dist`;
+if (existsSync('dist/clad.js')) {
+  mkdirSync(`${CLAUDE_DIST}/agents`, {recursive: true});
+  copyFileSync('dist/clad.js', `${CLAUDE_DIST}/clad.js`);
+  chmodSync(`${CLAUDE_DIST}/clad.js`, 0o755);
+  copyFileSync('dist/schema.json', `${CLAUDE_DIST}/schema.json`);
+  let bundledPersonas = 0;
+  for (const f of readdirSync('dist/agents')) {
+    if (!f.endsWith('.md')) continue;
+    copyFileSync(`dist/agents/${f}`, `${CLAUDE_DIST}/agents/${f}`);
+    bundledPersonas++;
+  }
+  // Sweep personas that no longer exist in dist/agents (0.6.0 renames).
+  const distPersonas = readdirSync('dist/agents').filter((f) => f.endsWith('.md'));
+  for (const f of readdirSync(`${CLAUDE_DIST}/agents`)) {
+    if (f.endsWith('.md') && !distPersonas.includes(f)) rmSync(`${CLAUDE_DIST}/agents/${f}`);
+  }
+  console.log(
+    `cladding plugin · claude-code: bundled engine (clad.js + schema.json + ${bundledPersonas} personas) → ${CLAUDE_DIST}/`,
+  );
+} else {
+  console.warn(
+    'cladding plugin · claude-code: dist/clad.js absent — run `npm run build` (build.mjs first) to bundle the standalone engine',
+  );
+}
+
+// --- Phase A3 — Claude Code hooks wiring guard (v0.6.0, F-1d23a6) ------
+//
+// plugins/claude-code/hooks/hooks.json is CANONICAL (hand-authored in the
+// plugin dir, not generated) — this script never writes or sweeps it. The
+// guard only validates presence + JSON shape so a refactor of the sweep
+// logic above (or a bad merge) cannot silently ship the plugin without its
+// lifecycle wiring. tests/scripts/hooks-config.test.ts pins the full shape.
+
+const CLAUDE_HOOKS_JSON = `${CLAUDE_PLUGIN_DIR}/hooks/hooks.json`;
+try {
+  const hooksDoc = JSON.parse(readFileSync(CLAUDE_HOOKS_JSON, 'utf8'));
+  const hookEvents = Object.keys(hooksDoc.hooks ?? {});
+  if (hookEvents.length === 0) throw new Error('no events wired under "hooks"');
+  console.log(
+    `cladding plugin · claude-code: hooks wiring OK (${hookEvents.length} events) — ${CLAUDE_HOOKS_JSON}`,
+  );
+} catch (err) {
+  console.warn(
+    `cladding plugin · claude-code: WARN ${CLAUDE_HOOKS_JSON} missing/invalid (${err.message}) — lifecycle hooks will not fire`,
+  );
 }
 
 // --- Phase B — Codex mirror (plugins/codex/skills/) -------------------
@@ -135,6 +214,26 @@ for (const entry of readdirSync(SRC_AGENTS)) {
   }
   writeFileSync(join(dstDir, 'SKILL.md'), content);
   codexPersonaCount++;
+}
+
+// 3) sweep stale skill dirs from earlier builds — anything that is neither a
+// current verb skill nor a current persona (e.g. the removed `work` verb, the
+// pre-0.6.0 `librarian`/`specialists` persona dirs). The mirror must track
+// the two canonical sources exactly.
+const codexExpected = new Set([
+  ...readdirSync(SRC_SKILLS).filter((v) => {
+    try {
+      return statSync(join(SRC_SKILLS, v, 'SKILL.md')).isFile();
+    } catch {
+      return false;
+    }
+  }),
+  ...personaFiles.map((f) => f.replace(/\.md$/, '')),
+]);
+for (const entry of readdirSync(CODEX_SKILLS)) {
+  const full = join(CODEX_SKILLS, entry);
+  if (!statSync(full).isDirectory()) continue;
+  if (!codexExpected.has(entry)) rmSync(full, {recursive: true});
 }
 
 writeFileSync(
@@ -340,4 +439,45 @@ if (claudeResult.changed) {
   console.log(
     `cladding plugin · detectors: ${detectorCount}/${detectorCount} (already in sync)`,
   );
+}
+
+// --- Phase E — stages-implemented auto-derive (v0.6.2) ----------------
+//
+// Same rationale as Phase D: the Claude Code manifest's `stages-implemented`
+// array must mirror what the engine actually runs (TIER_STAGES.all in
+// src/cli/clad.ts). Hand-maintained it silently drifted (13 listed vs 15
+// run) and HARNESS_INTEGRITY's stage-list check now guards it — so derive it
+// here from the one canonical source (source TEXT, not import, to match the
+// detector's anti-circular constraint) and rewrite the array. Idempotent.
+
+function deriveStageList(cliSource) {
+  const m = cliSource.match(/TIER_STAGES[\s\S]*?\ball:\s*\[([^\]]*)\]/);
+  if (!m) return null;
+  return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]);
+}
+
+function rewriteStageList(jsonPath, stages) {
+  const original = readFileSync(jsonPath, 'utf8');
+  const want = `[${stages.map((s) => `"${s}"`).join(', ')}]`;
+  const updated = original.replace(/("stages-implemented":\s*)\[[^\]]*\]/, `$1${want}`);
+  if (updated === original) return {changed: false};
+  writeFileSync(jsonPath, updated);
+  return {changed: true};
+}
+
+const CLI_SOURCE = 'src/cli/clad.ts';
+if (existsSync(CLI_SOURCE)) {
+  const stages = deriveStageList(readFileSync(CLI_SOURCE, 'utf8'));
+  if (stages && stages.length > 0) {
+    const stageResult = rewriteStageList(CLAUDE_PLUGIN_JSON, stages);
+    console.log(
+      stageResult.changed
+        ? `cladding plugin · stages: re-derived → ${stages.length} stages (updated ${CLAUDE_PLUGIN_JSON})`
+        : `cladding plugin · stages: ${stages.length} stages (already in sync)`,
+    );
+  } else {
+    console.warn(
+      `cladding plugin · stages: could not parse TIER_STAGES.all from ${CLI_SOURCE} — array left as-is`,
+    );
+  }
 }

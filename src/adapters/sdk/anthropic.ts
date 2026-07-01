@@ -24,6 +24,10 @@
 
 import process from 'node:process';
 
+import {appendEvent, newEvent} from '../../events/log.js';
+import {compressContext, shouldRecover} from '../../optimizer/headroom.js';
+import type {CompressOutcome, OpenAIMessage} from '../../optimizer/headroom.js';
+import type {ContextKind} from '../../optimizer/profiles.js';
 import type {Transport} from '../host/transport.js';
 import type {
   AgentAdapter,
@@ -61,16 +65,16 @@ interface AnthropicLike {
 export interface AnthropicTransportOptions {
   /** Override for the API key (defaults to process.env.ANTHROPIC_API_KEY). */
   readonly apiKey?: string;
-  /** Model id (defaults to `claude-opus-4-7`, the current strongest model). */
+  /** Model id (defaults to `claude-opus-4-8`, the current strongest model). */
   readonly model?: string;
-  /** Maximum output tokens per dispatch (defaults to 4096). */
+  /** Maximum output tokens per dispatch (defaults to 16384). */
   readonly maxTokens?: number;
   /** Test seam — supply a pre-built client to skip the dynamic import. */
   readonly clientFactory?: (apiKey: string) => AnthropicLike;
 }
 
-const DEFAULT_MODEL = 'claude-opus-4-7';
-const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_MODEL = 'claude-opus-4-8';
+const DEFAULT_MAX_TOKENS = 16384;
 
 /**
  * Real-LLM Transport. Dispatches through the Anthropic API and
@@ -115,18 +119,78 @@ export class AnthropicTransport implements Transport {
     }
     if (!this.cachedClient) this.cachedClient = this.clientFactory(this.apiKey);
     const userMessage = buildUserMessage(ctx);
-    const response = await this.cachedClient.messages.create({
+
+    // Headroom seam (F-6aebb9). Route the assembled (system + user) payload
+    // through the compression engine before the API call. The outcome is
+    // ALWAYS usable — on disabled config or any internal error it is the
+    // original text — so this is transparent to the call below and to the
+    // drive loop. 'spec' profile: keep the persona prefix stable for cache
+    // hits, protect the active ask.
+    const kind: ContextKind = 'spec';
+    const outcome = await compressContext(
+      [
+        {role: 'system', content: persona.body},
+        {role: 'user', content: userMessage},
+      ],
+      kind,
+    );
+    maybeEmitCompression(ctx.cwd, kind, outcome);
+    const system = pickContent(outcome.messages, 'system') ?? persona.body;
+    const baseUser = pickContent(outcome.messages, 'user') ?? userMessage;
+
+    // Context blocks (F-6aebb9): bulky tool outputs / logs / file dumps the
+    // caller attached. Each is routed through the seam with its OWN kind, so
+    // the compressor finally has a real payload (json_dedup / log_dedup /
+    // minify) — the shard above is 'spec'-protected. We assemble two user
+    // strings: one with the compressed blocks (sent), one with the originals
+    // (used only if auto-recovery fires). `anyBlockApplied` arms recovery.
+    let anyBlockApplied = false;
+    const compressedBlocks: string[] = [];
+    const originalBlocks: string[] = [];
+    for (const block of ctx.contextBlocks ?? []) {
+      const bout = await compressContext([{role: 'tool', content: block.content}], block.kind);
+      maybeEmitCompression(ctx.cwd, block.kind, bout);
+      anyBlockApplied = anyBlockApplied || bout.applied;
+      const compressed = bout.messages[0]?.content ?? block.content;
+      compressedBlocks.push(`\n\n### ${block.kind} context\n${compressed}`);
+      originalBlocks.push(`\n\n### ${block.kind} context\n${block.content}`);
+    }
+    const userContent = baseUser + compressedBlocks.join('');
+    const userOriginal = baseUser + originalBlocks.join('');
+
+    let response = await this.cachedClient.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
       // Cache the stable persona prefix (ephemeral, 5-min TTL): it is byte-identical
       // across every dispatch of this persona, so repeat calls re-read it from cache
-      // instead of re-billing the full system prompt. The variable per-feature shard
-      // stays in the user message AFTER the cached prefix so the cache key is stable.
+      // instead of re-billing the full system prompt. `system` comes from the Headroom
+      // seam above; the 'spec' profile sets compress_system_messages=false so the prefix
+      // is protected and stays byte-identical to persona.body — the cache key remains
+      // stable even with compression enabled. The variable per-feature shard stays in the
+      // user message AFTER the cached prefix.
       // (SDK transport only — the host/`claude -p` path caches independently.)
-      system: [{type: 'text', text: persona.body, cache_control: {type: 'ephemeral'}}],
-      messages: [{role: 'user', content: userMessage}],
+      system: [{type: 'text', text: system, cache_control: {type: 'ephemeral'}}],
+      messages: [{role: 'user', content: userContent}],
     });
-    const replyText = extractText(response.content);
+    let replyText = extractText(response.content);
+
+    // Auto-recovery (CLADDING_HEADROOM=auto): compression is lossy on the bulk
+    // it collapses. If it was applied AND the reply deterministically signals it
+    // needed the omitted data, re-dispatch this ONE turn with the original,
+    // uncompressed payload and use that reply instead. Bounded to a single retry.
+    if (shouldRecover(outcome.applied || anyBlockApplied, replyText)) {
+      appendEvent(
+        ctx.cwd,
+        newEvent('compression', {applied: false, kind, recovered: true, fallbackReason: 'auto_recovered'}),
+      );
+      response = await this.cachedClient.messages.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: [{type: 'text', text: persona.body, cache_control: {type: 'ephemeral'}}],
+        messages: [{role: 'user', content: userOriginal}],
+      });
+      replyText = extractText(response.content);
+    }
     return {
       identity: {
         author: 'llm',
@@ -148,6 +212,41 @@ export class AnthropicTransport implements Transport {
     }
     return Promise.resolve({ready: true});
   }
+}
+
+/** First message of `role` from a compressed/original payload, if present. */
+function pickContent(
+  messages: readonly OpenAIMessage[],
+  role: 'system' | 'user',
+): string | undefined {
+  return messages.find((m) => m.role === role)?.content;
+}
+
+/**
+ * Record a `compression` event when compression was actually attempted —
+ * i.e. not a deliberate no-op (disabled config or a sub-threshold payload).
+ * Lets the observability persona report realized savings + fallback rate
+ * without the seam itself depending on the events layer.
+ */
+function maybeEmitCompression(
+  cwd: string,
+  kind: ContextKind,
+  outcome: CompressOutcome,
+): void {
+  const reason = outcome.fallbackReason;
+  if (reason === 'disabled' || reason === 'below_min_tokens') return;
+  appendEvent(
+    cwd,
+    newEvent('compression', {
+      applied: outcome.applied,
+      kind,
+      tokensBefore: outcome.result?.tokensBefore ?? 0,
+      tokensAfter: outcome.result?.tokensAfter ?? 0,
+      tokensSaved: outcome.result?.tokensSaved ?? 0,
+      transformsApplied: outcome.result?.transformsApplied ?? [],
+      ...(reason ? {fallbackReason: reason} : {}),
+    }),
+  );
 }
 
 function buildUserMessage(ctx: AgentContext): string {

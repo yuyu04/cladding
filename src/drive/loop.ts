@@ -3,7 +3,7 @@
 // v0.2.0 rewires the v0.1 deterministic floor so each ready feature
 // is now authored through the {@link AgentAdapter} layer:
 //
-//   1. specialists persona drafts the implementation (mock or real),
+//   1. developer persona drafts the implementation (mock or real),
 //   2. its mutations are applied to the working tree,
 //   3. L1 gates (Type / Lint / Arch) verify the result,
 //   4. reviewer persona inspects in a separate dispatch — the
@@ -126,12 +126,28 @@ function applyMutations(cwd: string, mutations: readonly AgentMutation[]): void 
   }
 }
 
-function ctxFor(cwd: string, feature: Feature): AgentContext {
+function ctxFor(cwd: string, feature: Feature, priorGateFailure?: string): AgentContext {
+  // On a retry, attach the failing gate's output so the next developer
+  // dispatch knows WHAT to fix (previously it re-dispatched blind). The block
+  // is tagged 'logs' so the Headroom seam (F-6aebb9) compresses it when the
+  // tool output is bulky/repetitive (many type/lint errors) — small failures
+  // pass through untouched. This is the v0.3.x context-injection follow-up the
+  // loop header long noted.
+  const contextBlocks =
+    priorGateFailure && priorGateFailure.trim().length > 0
+      ? [
+          {
+            kind: 'logs' as const,
+            content: `Your previous attempt failed a gate. Fix these errors:\n\n${priorGateFailure}`,
+          },
+        ]
+      : undefined;
   return {
     featureId: feature.id,
     featureShard: JSON.stringify(feature),
     guardrails: [],
     cwd,
+    ...(contextBlocks ? {contextBlocks} : {}),
   };
 }
 
@@ -144,6 +160,9 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
   // Tracks the most recent failed gate per feature so the post-mortem
   // writer (Phase 3.3) can name the gate the rollback inherited from.
   const lastFailedGate = new Map<string, string>();
+  // Captured stderr of the most recent failed gate per feature — injected into
+  // the next dispatch as a context block so the agent can act on it (F-6aebb9).
+  const lastFailedGateOutput = new Map<string, string>();
   const featuresTouched: string[] = [];
   const stubsCreated: string[] = [];
   let gateRuns = 0;
@@ -192,7 +211,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     spec.features.filter((f) => f.status === 'done' || f.status === 'archived').map((f) => f.id),
   );
 
-  const specialists = loadPersona('specialists');
+  const developer = loadPersona('developer');
   const reviewer = loadPersona('reviewer');
 
   while (true) {
@@ -254,13 +273,13 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     // Phase 1 (v0.3.20) shipped the event surface; this phase wires
     // the drive loop into it.
     recordCheckpoint(cwd, ready.id);
-    const ctx = ctxFor(cwd, ready);
+    const ctx = ctxFor(cwd, ready, lastFailedGateOutput.get(ready.id));
 
     // Step 1 — specialist authors the implementation.
-    pulseProgress('drive', ready.id, 'specialist');
+    pulseProgress('run', ready.id, 'specialist');
     let specialistIdentity: string | undefined;
     try {
-      const specialistOut = await runAgent(specialists, ctx);
+      const specialistOut = await runAgent(developer, ctx);
       specialistIdentity = specialistOut.result.identity.name;
       applyMutations(cwd, specialistOut.result.mutations);
     } catch (err) {
@@ -283,7 +302,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     // is partially stubbed and a spec-wide MISSING_IMPLEMENTATION
     // sweep would always fail. `clad check` covers drift after the
     // loop completes.
-    pulseProgress('drive', ready.id, 'L1 gates');
+    pulseProgress('run', ready.id, 'L1 gates');
     const gates = [
       ['stage_1.1', runType({cwd})],
       ['stage_1.2', runLint({cwd})],
@@ -298,6 +317,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     if (failed) {
       retries.set(ready.id, (retries.get(ready.id) ?? 0) + 1);
       lastFailedGate.set(ready.id, failed[0]);
+      lastFailedGateOutput.set(ready.id, failed[1].stderr ?? '');
       appendEvent(cwd, newEvent('drift_detected', {feature: ready.id, gate: failed[0]}));
       pulseProgressEnd(
         'fail',
@@ -310,7 +330,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     // Step 4 — reviewer inspects. ReviewerIdentityCollisionError
     // bubbles up from drive/agent.ts when the adapter returns an
     // identity equal to the specialist — halt with HUMAN_REQUIRED.
-    pulseProgress('drive', ready.id, 'reviewer');
+    pulseProgress('run', ready.id, 'reviewer');
     try {
       await runAgent(reviewer, ctx, {implementerIdentityName: specialistIdentity});
     } catch (err) {
@@ -333,7 +353,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     // Step 5 — UAT (stage_4.2) requires a human-pass evidence.
     // Without one the loop pauses for sign-off instead of marking
     // the feature done.
-    pulseProgress('drive', ready.id, 'UAT');
+    pulseProgress('run', ready.id, 'UAT');
     const uat = runUat({cwd});
     if (!uat.pass && uat.exitCode !== 2) {
       pulseProgressEnd('fail', ready.id, 'UAT human sign-off required');
@@ -363,7 +383,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
           featureId: ready.id,
           stage: 'stage_1.3',
           kind: 'pass',
-          content: 'clad drive — L1 gates pass after specialist + reviewer dispatch',
+          content: 'clad run — L1 gates pass after specialist + reviewer dispatch',
           identity: {author: 'tool', name: 'clad-drive'},
         }),
       );
@@ -376,7 +396,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
             acId,
             stage: 'stage_1.3',
             kind: 'pass',
-            content: `clad drive — L1 gates pass for ${acId}`,
+            content: `clad run — L1 gates pass for ${acId}`,
             identity: {author: 'tool', name: 'clad-drive'},
           }),
         );

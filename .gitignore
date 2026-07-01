@@ -11,10 +11,16 @@ yarn.lock
 pnpm-lock.yaml
 
 # Build / dist
-dist/
+# Root-anchored: the repo-root dist/ is a build artifact and stays ignored,
+# but plugins/claude-code/dist/ is COMMITTED on purpose — the marketplace
+# plugin is git-distributed, so it must carry its bundled engine (v0.5.2).
+/dist/
 build/
 out/
 *.tsbuildinfo
+
+# Stray local artifacts (not part of the repo)
+presentation.zip
 
 # Coverage
 coverage/
@@ -62,3 +68,8 @@ playwright-report/
 # but should not bloat the repository — keep them local-only.
 docs/ab-evaluation-extended/scenarios/*/cladding/
 docs/ab-evaluation-extended/scenarios/*/vanilla/
+
+# Local screen recordings — source for README GIFs, regeneratable; keep out of the repo.
+*.mov
+# Headroom A/B benchmark — local python venv (not committed)
+.venv-headroom/
