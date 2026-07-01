@@ -38,6 +38,17 @@ import {writeAgentsMd, writeClaudeMdSection} from '../init/host-instructions.js'
 import {getCurrentCladdingVersion, getLastSetupVersion} from '../init/host-setup.js';
 import {installGitHook} from '../init/git-hook.js';
 import {loadIntentFromPathIfApplicable} from './intent-from-path.js';
+import {getHostMcpServer} from '../adapters/host/sampling-context.js';
+import {appendEvent, newEvent} from '../events/log.js';
+import {
+  i18nEnabled,
+  i18nModel,
+  normalizeToEnglish,
+  type TranslateFn,
+} from '../optimizer/lang-normalize.js';
+import {parse as parseYaml} from 'yaml';
+
+import {canonicalLang, langDisplayName, viewLang} from './scan/spec-lang.js';
 
 export interface InitOptions {
   readonly cwd?: string;
@@ -365,6 +376,40 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     intent = resolution.intent;
   }
 
+  // F-60b842 — i18n intent normalization. When a large non-English intent
+  // (e.g. a Korean planning doc loaded above) is about to be sent to the
+  // expensive onboarding model, translate it to English ONCE with a cheap
+  // model so the expensive call reads ~1.8x fewer tokens. SDK mode only:
+  // model selection is honored on direct SDK providers but NOT on host/MCP
+  // sampling, so we skip when a host MCP server is wired (host no-op). The
+  // normalizer never throws — on any failure the original intent is used.
+  if (intent && intent.length > 0 && i18nEnabled() && !getHostMcpServer()) {
+    const translator: TranslateFn | null = selectDispatcher({
+      noLlm: opts.noLlm,
+      model: i18nModel(),
+    });
+    const outcome = await normalizeToEnglish(intent, translator);
+    if (outcome.detectedNonEnglish) {
+      if (outcome.applied) {
+        process.stderr.write(
+          '[clad init] normalized non-English intent → English ' +
+            `(${outcome.charsBefore}→${outcome.charsAfter} chars) via ${i18nModel()}\n`,
+        );
+        intent = outcome.text;
+      }
+      appendEvent(
+        cwd,
+        newEvent('lang_normalized', {
+          applied: outcome.applied,
+          charsBefore: outcome.charsBefore,
+          charsAfter: outcome.charsAfter,
+          model: i18nModel(),
+          ...(outcome.fallbackReason ? {fallbackReason: outcome.fallbackReason} : {}),
+        }),
+      );
+    }
+  }
+
   // v0.3.43 — intent-aware onboarding. When the user passes a free-text
   // intent (`clad init <description>`), run the LLM-driven onboarding
   // path that returns a domain-aware project-context body + refined
@@ -570,6 +615,38 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
   }
   writeArtifact(cwd, 'docs/project-context.md', projectContextMd, created, proposals);
 
+  // F-36f11b — localized companion view. The canonical project-context.md is
+  // authored in CLADDING_SPEC_LANG (default English) so the model reads a
+  // token-lean body on every session. For humans who entered a non-English
+  // intent, generate a NON-AUTHORITATIVE localized view via a cheap model.
+  // SDK mode only (model override is honored on direct providers): skip in
+  // host/MCP mode. Best-effort — any failure leaves init untouched.
+  const companionLang = viewLang(intent);
+  if (companionLang && !getHostMcpServer()) {
+    const translator = selectDispatcher({noLlm: opts.noLlm, model: i18nModel()});
+    if (translator) {
+      // View 1 — the forest-level prose doc (always present).
+      await emitLocalizedView(
+        cwd,
+        `docs/project-context.${companionLang}.md`,
+        projectContextMd,
+        companionLang,
+        translator,
+      );
+      // View 2 — capabilities + scenarios digest (intent/onboarding path only).
+      if (onboarding) {
+        const digest = buildSpecDigest(onboarding.capabilitiesYaml, onboarding.scenarios);
+        await emitLocalizedView(
+          cwd,
+          `docs/spec-view.${companionLang}.md`,
+          digest,
+          companionLang,
+          translator,
+        );
+      }
+    }
+  }
+
   // v0.3.45 (F-d12edf) — onboarding scenarios. Each scenario from the
   // intent-aware onboarding lands in spec/scenarios/<slug>-<hash6>.yaml
   // so `clad_create_feature` can later bind new features to them via
@@ -721,4 +798,98 @@ function writeArtifact(
   mkdirSync(dirname(target), {recursive: true});
   writeFileSync(target, body);
   created.push(relPath);
+}
+
+/**
+ * Translate `sourceBody` to `companionLang` and write a NON-AUTHORITATIVE
+ * localized view at `viewPath`. Best-effort (F-36f11b): never throws; emits a
+ * `spec_view_generated` event for telemetry whether it succeeds or fails.
+ */
+async function emitLocalizedView(
+  cwd: string,
+  viewPath: string,
+  sourceBody: string,
+  companionLang: string,
+  translator: (prompt: string) => Promise<string>,
+): Promise<void> {
+  try {
+    const langName = langDisplayName(companionLang);
+    const prompt = [
+      `Translate the following Markdown document to ${langName} faithfully.`,
+      'Preserve all Markdown structure, headings, code fences, identifiers',
+      '(e.g. F-1a2b3c), slugs, and surface values verbatim. Output ONLY the',
+      'translated Markdown.',
+      '',
+      '---',
+      sourceBody,
+    ].join('\n');
+    const translated = (await translator(prompt)).trim();
+    if (translated.length === 0) return;
+    const header =
+      '<!-- GENERATED VIEW — NOT THE SSoT. Regenerated by clad init/refine; do ' +
+      `not edit by hand. Canonical language: ${langDisplayName(canonicalLang())}. -->\n\n`;
+    const body = `${header}${translated}\n`;
+    const abs = join(cwd, viewPath);
+    mkdirSync(dirname(abs), {recursive: true});
+    writeFileSync(abs, body, 'utf8');
+    process.stderr.write(`[clad init] wrote localized view ${viewPath} via ${i18nModel()}\n`);
+    appendEvent(
+      cwd,
+      newEvent('spec_view_generated', {
+        viewLang: companionLang,
+        canonicalLang: canonicalLang(),
+        path: viewPath,
+        charsCanonical: sourceBody.length,
+        charsView: body.length,
+        ok: true,
+      }),
+    );
+  } catch (err) {
+    appendEvent(
+      cwd,
+      newEvent('spec_view_generated', {
+        viewLang: companionLang,
+        canonicalLang: canonicalLang(),
+        path: viewPath,
+        charsCanonical: sourceBody.length,
+        charsView: 0,
+        ok: false,
+        error: err instanceof Error ? err.message.slice(0, 200) : String(err),
+      }),
+    );
+  }
+}
+
+/**
+ * Build a human-readable English digest of capabilities + scenarios for the
+ * localized companion view. The canonical YAML stays English (model-read); this
+ * digest is only the source for the human `.lang.md` translation.
+ */
+function buildSpecDigest(
+  capabilitiesYaml: string,
+  scenarios: readonly {slug: string; title: string; flow: string}[],
+): string {
+  const lines: string[] = ['# Spec overview — capabilities & scenarios', ''];
+  try {
+    const parsed = parseYaml(capabilitiesYaml) as {
+      capabilities?: Array<{title?: string; summary?: string}>;
+    };
+    const caps = parsed?.capabilities ?? [];
+    if (caps.length > 0) {
+      lines.push('## Capabilities', '');
+      for (const c of caps) lines.push(`- **${c.title ?? ''}** — ${c.summary ?? ''}`);
+      lines.push('');
+    }
+  } catch {
+    // capabilities body not parseable — skip that section, still emit scenarios
+  }
+  if (scenarios.length > 0) {
+    lines.push('## Scenarios', '');
+    for (const s of scenarios) {
+      lines.push(`- **${s.title}** (${s.slug})`);
+      lines.push(`  ${s.flow.trim().replace(/\s*\n\s*/g, ' ')}`);
+      lines.push('');
+    }
+  }
+  return lines.join('\n');
 }

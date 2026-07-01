@@ -94,6 +94,8 @@
 
 Added 0.6.0 (F-b84c38 — payloads carry `identity` + `head`): `feature_created` (spec shard authored) · `scenario_created` · `done_attempted` (gated flip, kept or reverted) · `gate_run` (tier verification outcome; deduped per identical HEAD/tier/strict/worst) · `stop_blocked` (F-1d23a6 — the Stop host hook blocked a session end on a fresh failure fingerprint; identical fingerprints demote without an event).
 
+Added by the i18n + headroom track: `compression` (F-6aebb9 — Headroom context-compression telemetry; emitted once per dispatch where compression was attempted, payload carries realized `tokensSaved` + `fallbackReason`) · `lang_normalized` (F-60b842 — cheap-model normalization of non-English intent; payload carries `charsBefore`/`charsAfter` + `fallbackReason`) · `spec_view_generated` (F-36f11b — non-authoritative localized companion view generated from the English canonical; payload carries `viewLang`/`canonicalLang` + `path`).
+
 ## Spec schema fields (frozen)
 
 `id` · `slug` · `title` · `status` · `modules` · `depends_on` · `acceptance_criteria` · `ears` · `text` · `condition` · `action` · `response` · `notes` · `test_refs` · `evidence_refs` · `oracle_refs` · `capabilities` · `scenarios` · `inventory` · `ai_hints` · `deliverable` · `oracle_policy`

@@ -71,3 +71,5 @@ docs/ab-evaluation-extended/scenarios/*/vanilla/
 
 # Local screen recordings — source for README GIFs, regeneratable; keep out of the repo.
 *.mov
+# Headroom A/B benchmark — local python venv (not committed)
+.venv-headroom/

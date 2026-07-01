@@ -126,12 +126,28 @@ function applyMutations(cwd: string, mutations: readonly AgentMutation[]): void 
   }
 }
 
-function ctxFor(cwd: string, feature: Feature): AgentContext {
+function ctxFor(cwd: string, feature: Feature, priorGateFailure?: string): AgentContext {
+  // On a retry, attach the failing gate's output so the next developer
+  // dispatch knows WHAT to fix (previously it re-dispatched blind). The block
+  // is tagged 'logs' so the Headroom seam (F-6aebb9) compresses it when the
+  // tool output is bulky/repetitive (many type/lint errors) — small failures
+  // pass through untouched. This is the v0.3.x context-injection follow-up the
+  // loop header long noted.
+  const contextBlocks =
+    priorGateFailure && priorGateFailure.trim().length > 0
+      ? [
+          {
+            kind: 'logs' as const,
+            content: `Your previous attempt failed a gate. Fix these errors:\n\n${priorGateFailure}`,
+          },
+        ]
+      : undefined;
   return {
     featureId: feature.id,
     featureShard: JSON.stringify(feature),
     guardrails: [],
     cwd,
+    ...(contextBlocks ? {contextBlocks} : {}),
   };
 }
 
@@ -144,6 +160,9 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
   // Tracks the most recent failed gate per feature so the post-mortem
   // writer (Phase 3.3) can name the gate the rollback inherited from.
   const lastFailedGate = new Map<string, string>();
+  // Captured stderr of the most recent failed gate per feature — injected into
+  // the next dispatch as a context block so the agent can act on it (F-6aebb9).
+  const lastFailedGateOutput = new Map<string, string>();
   const featuresTouched: string[] = [];
   const stubsCreated: string[] = [];
   let gateRuns = 0;
@@ -254,7 +273,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     // Phase 1 (v0.3.20) shipped the event surface; this phase wires
     // the drive loop into it.
     recordCheckpoint(cwd, ready.id);
-    const ctx = ctxFor(cwd, ready);
+    const ctx = ctxFor(cwd, ready, lastFailedGateOutput.get(ready.id));
 
     // Step 1 — specialist authors the implementation.
     pulseProgress('run', ready.id, 'specialist');
@@ -298,6 +317,7 @@ export async function runDriveLoop(opts: DriveOptions = {}): Promise<DriveResult
     if (failed) {
       retries.set(ready.id, (retries.get(ready.id) ?? 0) + 1);
       lastFailedGate.set(ready.id, failed[0]);
+      lastFailedGateOutput.set(ready.id, failed[1].stderr ?? '');
       appendEvent(cwd, newEvent('drift_detected', {feature: ready.id, gate: failed[0]}));
       pulseProgressEnd(
         'fail',

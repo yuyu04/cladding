@@ -43,6 +43,41 @@ export type EventType =
   // Configured-no-LLM paths (dispatcher === null or ctx === null) do NOT emit;
   // they are deliberate offline/greenfield runs, not a miss.
   | 'sentinel_miss'
+  // F-6aebb9 / AC-93e942 — Headroom compression telemetry. Emitted once per
+  // dispatch where compression was attempted (i.e. enabled + above the
+  // min-token gate), so the observability persona and `clad doctor` can
+  // report realized savings and fallback rate. Standard payload:
+  //   applied:           boolean            // true iff a compressed payload was used
+  //   kind:              ContextKind        // which profile was selected
+  //   tokensBefore:      number             // pre-compression token count (0 if unknown)
+  //   tokensAfter:       number             // post-compression token count (0 if unknown)
+  //   tokensSaved:       number
+  //   transformsApplied: readonly string[]  // Headroom transforms that ran
+  //   fallbackReason:    string             // present iff applied === false
+  // Disabled / below-min-token runs do NOT emit — they are deliberate no-ops,
+  // not compression activity worth recording.
+  | 'compression'
+  // F-60b842 / AC — i18n intent-normalization telemetry. Emitted by clad init
+  // when normalization is attempted on intent detected as non-English (SDK mode
+  // only), so clad doctor / observability can report realized token savings and
+  // skip/fallback rate. Standard payload:
+  //   applied:        boolean   // true iff the English translation was used
+  //   charsBefore:    number    // original intent length
+  //   charsAfter:     number    // translated length (== before on skip/fallback)
+  //   model:          string    // cheap model used for translation
+  //   fallbackReason: string    // present iff applied === false
+  // English / short / disabled / host-mode runs do NOT emit — deliberate no-ops.
+  | 'lang_normalized'
+  // F-36f11b / AC — localized companion-view telemetry. Emitted by clad init
+  // when it generates a non-authoritative human view (docs/project-context.<lang>.md)
+  // from the English canonical via a cheap model. Standard payload:
+  //   viewLang:     string   // companion language code (e.g. 'ko')
+  //   canonicalLang:string   // canonical authoring language (e.g. 'en')
+  //   path:         string   // companion file written
+  //   charsCanonical:number  // size of the canonical body translated
+  //   charsView:    number   // size of the generated view
+  //   ok:           boolean  // false iff generation failed (init still proceeds)
+  | 'spec_view_generated'
   // v0.6.0 (F-b84c38) — the supported per-feature cadence finally leaves a
   // trace. Each payload carries `identity` (git author or OS user) and `head`
   // (git HEAD sha) added by recordEvent; 23 hand-flipped dones proved the
