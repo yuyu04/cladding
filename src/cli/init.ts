@@ -432,7 +432,7 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     };
     onboarding = await interpretOnboardingWithFallback(intent, observed, dispatcher, cwd);
 
-    // v0.3.44 (F-09d68b) — persist the onboarding session so `clad refine`
+    // v0.3.44 (F-09d68b) — persist the onboarding session so `clad clarify`
     // can drive the Q&A loop without re-running the full intent prompt.
     // The state file lives at `.cladding/onboarding/state.yaml` and is
     // marked `status: done` once every question is answered.
@@ -457,20 +457,20 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
       if (opts.noLlm) {
         process.stderr.write(
           '[clad init] ℹ deterministic mode (--no-llm): spec/scenarios are stubs derived from ' +
-            "the intent verbatim (scenarios empty). Re-run without --no-llm — or use 'clad refine' — " +
+            "the intent verbatim (scenarios empty). Re-run without --no-llm — or use 'clad clarify' — " +
             'for domain-aware generation.\n',
         );
       } else if (onboarding.source === 'deterministic') {
         process.stderr.write(
           '[clad init] ⚠ LLM dispatcher did not fire — spec/scenarios are deterministic stubs ' +
             '(scenarios empty, intent quoted). Wire a host (run cladding as an MCP server in your AI ' +
-            "tool) or set an API key, then re-run or use 'clad refine'. See 'clad doctor' for details.\n",
+            "tool) or set an API key, then re-run or use 'clad clarify'. See 'clad doctor' for details.\n",
         );
       } else {
         // 'hybrid' — the dispatcher fired but some sentinels came back blank.
         process.stderr.write(
           '[clad init] ⚠ LLM dispatcher fired only partially — some spec/doc sections fell back to ' +
-            "deterministic stubs. Run 'clad refine' to complete them; see 'clad doctor' for the missed sections.\n",
+            "deterministic stubs. Run 'clad clarify' to complete them; see 'clad doctor' for the missed sections.\n",
         );
       }
     }
@@ -762,7 +762,7 @@ function renderScenarioYaml(scenario: {
   const escapedTitle = scenario.title.replace(/"/g, '\\"');
   const flowLines = scenario.flow.split('\n').map((line) => `  ${line}`).join('\n');
   return [
-    '# Cladding · Tier A · SSoT — onboarding output, edit-friendly · Refreshed by: clad init / clad refine',
+    '# Cladding · Tier A · SSoT — onboarding output, edit-friendly · Refreshed by: clad init / clad clarify',
     `id: ${scenario.id}`,
     `slug: ${scenario.slug}`,
     `title: "${escapedTitle}"`,

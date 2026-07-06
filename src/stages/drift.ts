@@ -15,6 +15,9 @@ import process from 'node:process';
 
 import {loadSpec, primeSpecCache} from '../spec/load.js';
 
+import {storeDetectorResult} from './detector-result-cache.js';
+import {architectureViolation} from './detectors/architecture-violation.js';
+import {hardcodedSecret} from './detectors/hardcoded-secret.js';
 import {allDetectors} from './detectors/index.js';
 import type {
   CommandStageOptions,
@@ -24,6 +27,16 @@ import type {
 } from './types.js';
 
 const detectors: DriftDetector[] = [...allDetectors];
+
+// The two detectors whose findings stage_1.5 (arch) and stage_1.6 (secret)
+// re-consume. When a gate run has primed the detector-result cache, runDrift
+// publishes just these two findings sets so those adapter stages fold them
+// instead of re-spawning madge + secretlint (F-e53596dd). Keyed off the
+// detectors' own `name` so a rename stays in sync across the three sites.
+const CACHED_DETECTOR_NAMES: ReadonlySet<string> = new Set([
+  architectureViolation.name,
+  hardcodedSecret.name,
+]);
 
 /**
  * Registers a drift detector into the module-level registry.
@@ -64,6 +77,12 @@ export interface DriftOptions extends CommandStageOptions {
    * @see stages/detectors/README.md — "Opt-in strict mode".
    */
   readonly strict?: boolean;
+  /**
+   * Detector selection. `'interactive'` (PostToolUse) runs only in-process
+   * detectors so latency stays ~1s; `'full'` (default — Stop, check tiers,
+   * MCP gateFooter) runs every registered detector.
+   */
+  readonly profile?: 'full' | 'interactive';
 }
 
 /**
@@ -89,14 +108,27 @@ export function runDrift(opts: DriftOptions = {}): DriftReport {
   // serve stale spec; a load failure primes nothing and every detector keeps
   // its own established load-failure behavior (withSpec info / silent).
   const cwd = opts.cwd ?? '.';
+  // Interactive profile (PostToolUse) excludes subprocess-flagged detectors
+  // BEFORE the loop so they never spawn; their names ride out on the report so
+  // the caller can render what was deferred instead of silently dropping it.
+  const interactive = opts.profile === 'interactive';
+  const active = interactive ? detectors.filter((d) => !d.subprocess) : detectors;
+  const skippedDetectors = interactive ? detectors.filter((d) => d.subprocess).map((d) => d.name) : [];
   try {
     primeSpecCache(cwd, loadSpec(cwd));
   } catch {
     primeSpecCache(cwd, null);
   }
   try {
-    for (const detector of detectors) {
-      findings.push(...detector.run(opts));
+    for (const detector of active) {
+      const detectorFindings = detector.run(opts);
+      findings.push(...detectorFindings);
+      // Publish the arch/secret findings for stage_1.5/1.6 to reuse. No-op
+      // unless a gate-run session is primed (storeDetectorResult guards on it),
+      // so standalone / PostToolUse / MCP-drift runs are unchanged (F-e53596dd).
+      if (CACHED_DETECTOR_NAMES.has(detector.name)) {
+        storeDetectorResult(detector.name, cwd, detectorFindings);
+      }
     }
   } finally {
     primeSpecCache(cwd, null);
@@ -110,6 +142,7 @@ export function runDrift(opts: DriftOptions = {}): DriftReport {
     pass,
     exitCode: pass ? 0 : 1,
     findings,
+    skippedDetectors,
   };
 }
 

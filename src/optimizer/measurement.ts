@@ -24,12 +24,20 @@
 // anyway). It answers "what does the graph give you", not "does the agent use it".
 
 import {estTokens} from './code-excerpt.js';
+import type {ModuleReader} from './infer-depends-on.js';
 import {buildIterativeImpactSlice} from './iterative-slice.js';
 import {buildWorkingSet} from './working-set.js';
 import {reverseIndexOf} from '../spec/reverse-index.js';
 import type {Spec} from '../spec/types.js';
 
-export type ModuleReader = (path: string) => string | null;
+/**
+ * The single source of the honest-scope caveat every measure surface must carry
+ * (the CLI report block AND the persisted-ledger trend). Exported so neither
+ * copy can drift from the other — a trend that drops this caveat becomes the
+ * stale-claim factory F-39609db4 exists to prevent.
+ */
+export const MEASUREMENT_DISCLAIMER =
+  '(deterministic upper bound vs the shard+all-modules baseline — not an agent-adoption measurement)';
 
 export interface FeatureEfficiency {
   readonly id: string;

@@ -19,6 +19,9 @@ import {join} from 'node:path';
 import {describe, expect, test} from 'vitest';
 
 import {allDetectors} from '../src/stages/detectors/index.js';
+// TIER_STAGES is the SSoT for the Iron Law stage list; importing clad.ts is
+// safe because its CLI entry is guarded by `isCliEntry` (no parse on import).
+import {TIER_STAGES} from '../src/cli/clad.js';
 
 const ROOT = process.cwd();
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
@@ -33,6 +36,63 @@ describe('cladding self-consistency (no Vacuous Green against itself)', () => {
       const m = read(f).match(/(\d+)\s+(?:drift\s+)?detectors?\b/i);
       expect(m, `${f} should state a detector count`).not.toBeNull();
       expect(Number(m![1]), `${f} detector-count claim should equal allDetectors.length`).toBe(actual);
+    }
+  });
+
+  test('README prose detector-count claims match the actual detector count (F-898783ee)', () => {
+    const actual = allDetectors.length;
+    // Three README-family files headline cladding's own detector count. Each
+    // regex is scoped to that file's HEADLINE phrasing so per-subset counts
+    // never false-trip: README.md also says "41 detectors"/"41 detector" and
+    // lists bare "10"/"6"/… per-direction cells in the detector table, while
+    // src/stages/detectors/README.md discusses the historical upstream
+    // "19 detectors" headline and the "3 always-error" / "16 conditional"
+    // subsets. Anchoring on "drift detectors" (README) and "detectors are
+    // wired" (inventory) captures only the live-count claim in each.
+    //
+    // README.ko.md (AC-4772bf42): the KO headline mixes Korean and English —
+    // "41개 검출기" (Korean noun) plus "41 detector(s)" (English). Anchoring on
+    // the English "detector" token captures every numbered claim (all four read
+    // 41) while skipping the Korean-noun phrasings and the per-direction "수"
+    // table cells (numbers followed by a detector NAME, not the word
+    // "detector"), so the KO variant can no longer silently drift from the EN.
+    const guards: Array<{file: string; re: RegExp; label: string}> = [
+      {file: 'README.md', re: /(\d+)\s+drift detectors/g, label: '"<N> drift detectors"'},
+      {file: 'src/stages/detectors/README.md', re: /(\d+)\s+detectors are wired/g, label: '"<N> detectors are wired"'},
+      {file: 'README.ko.md', re: /(\d+)\s+(?:drift\s+)?detectors?\b/gi, label: '"<N> [drift] detector(s)" (KO)'},
+    ];
+    for (const {file, re, label} of guards) {
+      const matches = [...read(file).matchAll(re)];
+      expect(matches.length, `${file} should state ${label} at least once`).toBeGreaterThan(0);
+      for (const m of matches) {
+        expect(Number(m[1]), `${file} ${label} claim "${m[0]}" should equal allDetectors.length`).toBe(actual);
+      }
+    }
+  });
+
+  test('README/AGENTS stage-count claims match TIER_STAGES.all.length (F-898783ee)', () => {
+    const actual = TIER_STAGES.all.length;
+    // README.md says "15-stage"/"15 stages"; AGENTS.md says "15 Iron Law
+    // stages". The README regex requires the numeral ADJACENT to "stage(s)"
+    // (a single hyphen or space) so the "9 deterministic stages" subset claim
+    // never false-trips; the AGENTS regex tolerates the "Iron Law" infix.
+    //
+    // README.ko.md (AC-4772bf42): the KO stage noun is "단계", which the file
+    // ALSO uses for subsets ("3단계"/"9단계" per tier) and setup steps
+    // ("1단계"/"2단계"). Anchoring on "<N>단계" immediately followed by
+    // "게이트"/"Iron Law" captures only the four total-gate claims (all 15) and
+    // never the subset/step counts.
+    const guards: Array<{file: string; re: RegExp; label: string}> = [
+      {file: 'README.md', re: /(\d+)[-\s]stages?\b/g, label: '"<N>-stage"/"<N> stages"'},
+      {file: 'AGENTS.md', re: /(\d+)\s+(?:Iron Law\s+)?stages\b/g, label: '"<N> Iron Law stages"'},
+      {file: 'README.ko.md', re: /(\d+)단계\s+(?:게이트|Iron Law)/g, label: '"<N>단계 게이트/Iron Law" (KO)'},
+    ];
+    for (const {file, re, label} of guards) {
+      const matches = [...read(file).matchAll(re)];
+      expect(matches.length, `${file} should state ${label} at least once`).toBeGreaterThan(0);
+      for (const m of matches) {
+        expect(Number(m[1]), `${file} ${label} claim "${m[0]}" should equal TIER_STAGES.all.length`).toBe(actual);
+      }
     }
   });
 

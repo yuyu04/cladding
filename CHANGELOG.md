@@ -7,6 +7,207 @@ Versioning: [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] — Adoption Proof + Friction Diet (2026-07-06)
+
+Adoption Proof + Friction Diet: the merge conflicts that plagued parallel
+work are structurally gone, the per-edit hook is ~12× faster, the README
+says only what the record can prove, and "is the context tooling actually
+adopted?" finally has a written, measurable answer. A cleanup pass then
+tidied the house: superseded docs deleted or compressed to abstracts, one
+canonical name per concept in the glossary, a 30% lighter CLAUDE.md
+template for adopters, and dead seams swept out of the code.
+
+> **Heads-up:** `spec/attestation.yaml` converts to a per-module v2 format
+> on your first GREEN strict pre-push gate after upgrading — automatic, no
+> manual step; older CLIs/plugins read the new file as "no entries" (warn
+> only) until they're updated too, so update both channels together.
+> `spec.yaml` stops carrying `last_synced`, and `.gitattributes` should drop
+> `merge=union` for the attestation file (`clad init --with-hook`/docs cover
+> it). The per-edit PostToolUse hook now defers the two subprocess detectors
+> (madge, secretlint) to Stop/commit — feedback moves from instant to
+> turn-end for those two only.
+
+### Added
+
+- ▸ **An adoption verdict with a written decision rule.** `clad measure
+  --sessions` now renders whether an agent actually *chose* to pull context
+  (resolved working-set serves) versus merely receiving pushed cards —
+  pushes can never raise the verdict. Thresholds live in code, the decision
+  rule and its observation window live in `docs/b1-adoption-protocol.md`,
+  and the first real data point is already recorded: 64 completed cycles,
+  0 pulls, not confirmed.
+- ▸ **Explicit doc→feature bindings.** Markdown docs can declare the
+  features their evidence supports with a `clad-doc-links` comment; the five
+  A/B case studies (including the NULL results) are now reachable from the
+  knowledge graph instead of being orphans.
+- ▸ **A canonical merge ritual.** `docs/spec-ids-multi-dev.md` documents the
+  one rule for derived-file conflicts — never hand-resolve; keep either
+  side, finish the merge, run the gate — including why PR-surface conflicts
+  still happen and the one-time v1→v2 transition.
+- ▸ **A loop-engineering section in the README** — using cladding as an
+  agent loop's verifier and state layer: `clad check --json` as the feedback
+  signal, `clad done` as the honest stop, the local event log as loop
+  memory (and never more than that).
+
+### Changed
+
+- ▸ **Old docs are gone or shrunk, with the evidence preserved.** Two
+  superseded design notes are deleted (their one unique paragraph each
+  relocated to the code they described), two historical benchmark run-logs
+  are compressed to dated abstracts that keep the NULL findings — full
+  reports stay one git-history hop away — and the multi-provider roadmap
+  drops its stale planning prose while keeping the canonical Transport
+  section. Four benchmark documents are explicitly protected, including an
+  un-discharged pre-registration.
+- ▸ **One concept, one name.** The glossary now defines the impact-card
+  family, the context-slice vs working-set rule, the phases/stages/tiers/
+  detectors quartet, and the mapping that resolves the worst cross-surface
+  confusion: `clad check --strict` is `clad_run_gate` (the full gate);
+  `clad_run_check` is the cheap drift-only subset. The status help no
+  longer names the removed ANSI panel, the oracle brief calls itself
+  impl-blind everywhere, and the Korean README's counts join the
+  self-consistency guard.
+- ▸ **The adopter CLAUDE.md section is 30% lighter** with every policy
+  anchor intact — the freshness literals that keep `clad update` stable
+  are now directly test-pinned.
+- ▸ **Code compaction.** Four dead config seams inlined, git ref
+  resolution now lives in one place, and the measure family moved out of
+  the largest CLI file (124 lines) with byte-identical output.
+- ▸ **Attestation v2 — one line per module file.** The verification record
+  no longer amplifies one shared-file edit into every co-owning feature's
+  line: disjoint parallel work now merges clean under plain 3-way, GitHub
+  PR surface included, and stale warnings name the exact drifted module.
+  Readers accept both formats; the gate converts on first GREEN. Validated
+  against real merges in 30 scratch repositories plus authentic v1 files
+  written by the published 0.8.0 CLI.
+- ▸ **The per-edit hook runs in-process detectors only.** PostToolUse drops
+  from ~5.8s to ~0.5s per significant edit (measured against the published
+  0.8.0); the two subprocess detectors still run at Stop and in every
+  commit-tier gate, and a registry test keeps the partition honest.
+- ▸ **`spec.yaml` stops emitting `last_synced`.** The inventory block is
+  counts-only, so re-syncing with unchanged counts is byte-identical and
+  parallel branches stop colliding on a date stamp. Legacy lines are
+  dropped automatically on the next sync.
+- ▸ **The README record claim matches reality.** What was verified lands in
+  committed content, who/when in the local session ledger, why in the spec
+  — the audits/regulatory-response wording is gone, the EU AI Act / SOX
+  sentence carries its not-a-certification hedge in all four variants, and
+  the SSoT table no longer calls a local rotating log immutable.
+- ▸ **Every emitted banner and message names only current verbs** — the last
+  `clad refine`/`clad drive`/`clad panel` residue is swept, guarded by a
+  tripwire test; adopter files with old banners stay recognized.
+
+### Fixed
+
+- ▸ **Gate, sync, update, and done no longer write derived files mid-merge.**
+  A merge/rebase/cherry-pick in progress defers attestation and inventory
+  writes (with a note) and refuses `clad done` outright — a half-merged tree
+  can never be stamped as verified. Validated against real conflicted
+  merges and cherry-picks.
+
+## [0.8.0] — Context Push (2026-07-03)
+
+The harness stops waiting to be asked: it pushes the right context at you as
+you work, proves its own surfaces actually fired, and adds an audit-ready
+review packet — plus first-class Python support.
+
+> **Heads-up:** the after-edit hooks now also watch shell commands
+> (`sed`/heredoc/`tee`) and more file types (`.tsx`/`.jsx`, Kotlin, Java, Ruby,
+> PHP, C#, Elixir), so expect impact cards in more places. The drift-detector
+> count goes **40 → 41**. Three new commands land — `clad report`,
+> `clad bundle`, `clad doctor --hosts`. And `clad measure` now saves snapshots
+> under `.cladding/` (compare runs with `--trend`).
+
+### Added
+
+- ▸ **A real impact card after every edit.** Change a file and the card now
+  sums up what breaks, which tests to re-run, and a rough risk level — kept
+  short by a per-session token budget and de-duplicated so it never repeats.
+- ▸ **"No LLM at the detector layer" is now a machine rule.** An architecture
+  forbidden-import rule blocks the detector layer from reaching the agent
+  adapters, and a purity suite asserts no detector's run is async — this
+  Iron Law invariant was prose-only before.
+- ▸ **Cards for shell-made edits.** Files changed through `sed`, heredocs, or
+  `tee` (not just the editor) are now detected and get the same card.
+- ▸ **Cards for more languages.** `.tsx`/`.jsx` and Kotlin, Java, Ruby, PHP,
+  C#, and Elixir files now surface impact cards, matching every language
+  cladding already reads.
+- ▸ **A session-start card that points the way.** When a session opens, the
+  card names the two context tools (working-set and impact) and echoes the
+  project's own preferred patterns.
+- ▸ **The harness proves its surfaces fired.** cladding records when each card
+  or hint actually showed (or was skipped); read it back with
+  `clad measure --sessions`.
+- ▸ **Measurement that remembers.** `clad measure` persists snapshots under
+  `.cladding/`, and `--trend` prints the deltas between runs.
+- ▸ **Reproducible release numbers.** `clad changelog --measure` embeds
+  measured, reproducible figures straight into the release notes.
+- ▸ **The final smoke gate runs every check you declared.** The deliverable
+  smoke stage now runs all declared probes and reports the worst result, bound
+  per feature — one skipped probe can no longer hide behind a passing one.
+- ▸ **Python is first-class.** Detectors read pytest test globs, `coverage.xml`
+  coverage, and dotted imports for the architecture checks.
+- ▸ **`clad report` — a PR review packet.** One command renders spec changes,
+  owning features, the regression set, and gate status as markdown, JSON, or
+  SARIF.
+- ▸ **`clad bundle` — a zero-install audit bundle.** Writes one self-contained
+  HTML file you can double-click (no install, no internet), plus a
+  `clad status --json` machine view.
+- ▸ **`clad doctor --hosts` — dated host receipts.** Produces dated evidence of
+  which hosts are verified, and a new detector warns when a README claims more
+  host support than that evidence backs.
+- ▸ **Kotlin Gradle module-scoped gate finalized.** The per-module gate for
+  Gradle monorepos is now settled and covered.
+
+### Changed
+
+- ▸ **Hooks also watch shell commands.** The after-tool matcher now includes
+  Bash, so a shell edit triggers the same impact card as an editor edit.
+- ▸ **41 drift detectors** (was 40) — the new one flags a README that claims
+  more host support than the evidence supports.
+- ▸ **cladding smokes its own version banner.** The project's smoke config now
+  runs a second probe (the CLI version output), exercising the new multi-probe
+  aggregation on every gate run.
+- ▸ **The gate runs each tool once, not twice.** `madge` and `secretlint` used
+  to spawn twice per `clad check` — once in the drift stage, then again in the
+  thin architecture and secret adapter stages. A run-scoped result cache, primed
+  and cleared only at the gate seams, lets the adapter stages reuse the drift
+  findings instead of re-spawning. Measured on the pre-commit tier: 11.4s →
+  5.4-5.7s, one spawn per tool instead of two — a cost the Stop hook had been
+  paying on every agent-loop turn.
+- ▸ **Bounded MCP session cost.** Tool descriptions are resident in every
+  session and re-read on every loop turn. The three that carried workflow essays
+  — `clad_create_feature`, `clad_changelog`, `clad_get_graph` (2,115 / 1,383 /
+  1,138 bytes) — are trimmed to about two lines (≤400 characters) that point at
+  their canonical docs, and a budget test caps every description so they cannot
+  silently regrow.
+- ▸ **cladding guards its own counts.** The detector and stage counts printed in
+  the READMEs and agent docs are now asserted against the live registry by the
+  self-consistency suite — the tool that flags drift had itself drifted (its own
+  docs variously said 38 and 40 detectors while the registry carried 41).
+
+### Removed
+
+- ▸ **The three renamed CLI verbs are gone.** `drive`, `panel`, and `refine` —
+  the old spellings kept working since 0.6.0 as aliases for `run`, `status`,
+  and `clarify` — are removed. Typing one now returns an unknown-command error;
+  use the new name instead.
+- ▸ **Their skill stubs are gone too.** The `drive`, `panel`, and `refine`
+  redirect skills under `skills/` (and their Codex mirror copies) are deleted.
+- This completes the removal the deprecation notice has promised on every use of
+  those verbs since 0.6.0.
+
+### Fixed
+
+- ▸ **A gate that crashes can never read green.** Verdict matching is now
+  word-bounded and a crashed CLI is never counted as a pass — closing a path
+  an empty green could slip through.
+- ▸ **No stray measurement snapshots.** `clad measure` no longer persists a
+  snapshot when there is no commit to anchor it to.
+- ▸ **Large `--json` output no longer truncates.** `clad report` /
+  `clad status --json` over ~64KB used to get cut off in a pipe; the output is
+  now fully drained before exit.
+
 ## [0.7.1] — 2026-07-02 — Honest Graph
 
 Repairs found by a deep multi-agent review of the 0.7.0 graph capability.

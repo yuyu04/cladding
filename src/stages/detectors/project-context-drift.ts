@@ -40,12 +40,8 @@ function runProjectContextDrift(opts: CommandStageOptions): readonly DriftFindin
   return withSpec(cwd, NAME, (spec) => detect(spec, cwd));
 }
 
-function resolveThreshold(): number {
-  return DEFAULT_MIN_FEATURES_FOR_CONTEXT;
-}
-
 function detect(spec: Spec, cwd: string): readonly DriftFinding[] {
-  if (spec.features.length < resolveThreshold()) return [];
+  if (spec.features.length < DEFAULT_MIN_FEATURES_FOR_CONTEXT) return [];
   const path = join(cwd, 'docs', 'project-context.md');
   if (!existsSync(path)) return []; // absence is ABSENCE_OF_GOVERNANCE's job
 
@@ -65,7 +61,7 @@ function detect(spec: Spec, cwd: string): readonly DriftFinding[] {
       message:
         `${spec.features.length} features but docs/project-context.md is still the unrefined init ` +
         'template (it still carries the placeholder prompts) — the Why/What/Purpose narrative was ' +
-        'never filled in. Refine it with `clad refine` or by hand.',
+        'never filled in. Fill it in with `clad clarify` or by hand.',
     },
   ];
 }

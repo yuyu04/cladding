@@ -7,29 +7,37 @@
 // CLI behavior.
 
 import process from 'node:process';
-import {readFileSync} from 'node:fs';
+import {readFileSync, writeFileSync} from 'node:fs';
 
 import {Command} from 'commander';
 
 import {classifyIntent} from '../router/intent.js';
 import {runChangelogCommand} from './changelog.js';
+import {collectChangelog, defaultSinceRef} from '../changelog/collect.js';
+import {renderAuditTable, renderCatalog, renderChangelogMarkdown} from '../changelog/render.js';
+import {buildBundleHtml, type BundleChanges} from '../report/bundle.js';
+import {runReportCommand} from './report.js';
 import {runDoctorCommand} from './doctor.js';
+import {runDoctorHosts} from './doctor-hosts.js';
 import {runDone} from './done.js';
 import {runHookCommand} from './hook.js';
 import {runUpdate} from './update.js';
 import {runInit} from './init.js';
 import {runClarifyCommand} from './clarify.js';
-import {runHostSetup} from '../init/host-setup.js';
+import {getCurrentCladdingVersion, runHostSetup} from '../init/host-setup.js';
 import {recordEvent} from '../events/log.js';
 import {buildContextSlice} from '../optimizer/context-slice.js';
 import {buildImpactSlice} from '../optimizer/reverse-slice.js';
 import {inferDependsOn} from '../optimizer/infer-depends-on.js';
-import {measureGraphEfficiency} from '../optimizer/measurement.js';
+import {measureGraphEfficiency, MEASUREMENT_DISCLAIMER} from '../optimizer/measurement.js';
+import {appendMeasureSnapshot} from '../optimizer/measure-ledger.js';
+import {runSessionsMeasure, runTrendMeasure} from './measure.js';
 import {runGraphExportCommand, runGraphStatsCommand} from './graph.js';
 import {runGraphServeCommand} from './graph-serve.js';
 import {strictSkipViolations} from '../stages/skip-policy.js';
 import {runArch} from '../stages/arch.js';
 import {runAudit} from '../stages/audit.js';
+import {clearDetectorResultCache, primeDetectorResultCache} from '../stages/detector-result-cache.js';
 import {runCommit} from '../stages/commit.js';
 import {runCov} from '../stages/cov.js';
 import {runDrift} from '../stages/drift.js';
@@ -46,7 +54,8 @@ import {runVisual} from '../stages/visual.js';
 import type {DriftFinding, Disposition} from '../stages/types.js';
 import {gateStatusOf, isBlocking, worstContribution, type GateStatus} from '../stages/disposition.js';
 import {staleSpecification} from '../stages/detectors/stale-specification.js';
-import {findLatestCheckpoint, recordCheckpoint, recordRollback} from '../core/checkpoint.js';
+import {findLatestCheckpoint, readGitHead, recordCheckpoint, recordRollback} from '../core/checkpoint.js';
+import {gitOperationInProgress, gitOperationInProgressName} from '../core/git-ops.js';
 import {maintainDeliverable} from '../spec/deliverable-detect.js';
 import {computeInventory, writeInventoryToSpecYaml, writeFeatureIndex} from '../spec/inventory.js';
 import {writeDocLinksYaml} from '../spec/doc-references.js';
@@ -56,7 +65,7 @@ import {buildBlindPayload, renderBlindBrief} from '../oracle/payload.js';
 import {requiredOracleWorklist} from '../oracle/policy.js';
 import {loadSpec} from '../spec/load.js';
 import {pulse, type PulseKind} from '../ui/pulse.js';
-import {renderPanel} from '../ui/panel.js';
+import {buildPanelModel, renderPanel} from '../ui/panel.js';
 import {featureLabel, gateLabel, haltMessage} from '../ui/softShell.js';
 
 /** Handler for `clad serve`. Boots the MCP server over stdio. */
@@ -235,29 +244,33 @@ export function runSyncCommand(opts: {proposeArchive?: boolean} = {}): void {
     const spec = loadSpec();
     // v0.3.56 (F-5b9f9f) — auto-rewrite the `inventory:` block in
     // spec.yaml on every sync so AI agents can grep 1 file to see
-    // the project's whole scale. ISO-date `last_synced` keeps the
-    // file commit-stable across same-day runs.
-    const inventory = computeInventory('.');
-    writeInventoryToSpecYaml('.', inventory);
-    writeFeatureIndex('.'); // F-37b4a8 — 1-file feature lookup at scale
-    writeDocLinksYaml('.'); // F-doc-graph — doc→spec/doc link index (Tier C)
-    // F-c037ae — heal annotation drift before it rejects correct features:
-    // unique-basename repair of moved test_ref paths + derived: suggestions
-    // (which never satisfy a mandate — see MISSING_TESTS/UNTESTED_AC).
-    const refFixes = repairTestRefs('.');
-    for (const r of refFixes.repaired) pulse('note', 'test_refs', `repaired ${r.from} → ${r.to} (${r.shard})`);
-    for (const sug of refFixes.suggested) pulse('note', 'test_refs', `suggested ${sug.ref} (${sug.shard}) — confirm by removing the 'derived:' prefix`);
-    // v0.5.x — auto-populate project.deliverable when absent + a CLI entry is calibratable, so
-    // DELIVERABLE_SMOKE (stage_2.4) engages without the agent having to declare it correctly (the
-    // re-run showed a conservative agent declares it DISABLED). Calibrates against the passing state,
-    // so it never enables a false-failing invocation. One-time (skips once a deliverable is present).
-    const autoDeliverable = maintainDeliverable('.');
-    if (autoDeliverable) {
-      pulse(
-        'note',
-        'deliverable',
-        `auto-detected entry '${autoDeliverable.path}' — the gate now smoke-tests it (stage_2.4). Opt out with is_safe_to_smoke: false.`,
-      );
+    // the project's whole scale. Counts only — an unchanged-count
+    // re-sync is byte-identical, so parallel branches don't conflict.
+    if (gitOperationInProgress('.')) {
+      pulse('note', 'sync', 'derived-file writes deferred — git operation in progress; re-run after the merge/rebase completes.');
+    } else {
+      const inventory = computeInventory('.');
+      writeInventoryToSpecYaml('.', inventory);
+      writeFeatureIndex('.'); // F-37b4a8 — 1-file feature lookup at scale
+      writeDocLinksYaml('.'); // F-doc-graph — doc→spec/doc link index (Tier C)
+      // F-c037ae — heal annotation drift before it rejects correct features:
+      // unique-basename repair of moved test_ref paths + derived: suggestions
+      // (which never satisfy a mandate — see MISSING_TESTS/UNTESTED_AC).
+      const refFixes = repairTestRefs('.');
+      for (const r of refFixes.repaired) pulse('note', 'test_refs', `repaired ${r.from} → ${r.to} (${r.shard})`);
+      for (const sug of refFixes.suggested) pulse('note', 'test_refs', `suggested ${sug.ref} (${sug.shard}) — confirm by removing the 'derived:' prefix`);
+      // v0.5.x — auto-populate project.deliverable when absent + a CLI entry is calibratable, so
+      // DELIVERABLE_SMOKE (stage_2.4) engages without the agent having to declare it correctly (the
+      // re-run showed a conservative agent declares it DISABLED). Calibrates against the passing state,
+      // so it never enables a false-failing invocation. One-time (skips once a deliverable is present).
+      const autoDeliverable = maintainDeliverable('.');
+      if (autoDeliverable) {
+        pulse(
+          'note',
+          'deliverable',
+          `auto-detected entry '${autoDeliverable.path}' — the gate now smoke-tests it (stage_2.4). Opt out with is_safe_to_smoke: false.`,
+        );
+      }
     }
     if (opts.proposeArchive) {
       const findings = staleSpecification.run({cwd: '.'});
@@ -373,7 +386,11 @@ export async function runUpdateCommand(): Promise<void> {
     process.exit(r.code);
     return;
   }
-  pulse('pass', 'spec', `inventory synced · ${r.features} features`);
+  if (r.inventoryDeferred) {
+    pulse('note', 'spec', `inventory + index writes deferred — git operation in progress; re-run \`clad update\` after it completes (${r.features} features seen).`);
+  } else {
+    pulse('pass', 'spec', `inventory synced · ${r.features} features`);
+  }
   pulse(r.claudeMd === 'refreshed-stale' ? 'note' : 'pass', 'CLAUDE.md', r.claudeMd);
   pulse(r.agentsMd === 'refreshed-stale' ? 'note' : 'pass', 'AGENTS.md', r.agentsMd);
   for (const d of r.deprecations) pulse('note', 'deprecated', d);
@@ -466,31 +483,41 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
   const pulseKindOf = (s: GateStatus): PulseKind =>
     s === 'pass' ? 'pass' : s === 'liveness' ? 'note' : s === 'na' ? 'skip' : isBlocking(s) ? 'fail' : 'skip';
   const collected: {stage: string; label: string; status: GateStatus; exitCode: number; stderr?: string; findings?: readonly DriftFinding[]}[] = [];
-  for (const [name, run] of stages) {
-    const r = run({}) as {
-      pass: boolean;
-      exitCode: number;
-      stderr?: string;
-      findings?: readonly DriftFinding[];
-      disposition?: Disposition;
-    };
-    const label = opts.internal ? name : gateLabel(name);
-    // INVARIANT: exitCode 2 means "skipped" (cladding chose not to run — tool
-    // missing / unknown language). It is NON-blocking. A stage that RAN and
-    // found a real problem MUST return exitCode 1, never 2 — see
-    // stages/util.ts::ranToolResult. (tsc exits 2 on type errors; relaying that
-    // raw 2 here is what let a real type failure pass as a skip.)
-    // Disposition-first (F-e0f6c7): see stages/disposition.ts.
-    const status = gateStatusOf(r);
-    if (isBlocking(status)) {
-      anyFailed = true;
-      worst = Math.max(worst, worstContribution(r, status));
+  // F-e53596dd — prime the run-scoped detector cache so the drift stage's
+  // ARCHITECTURE_VIOLATION + HARDCODED_SECRET runs are reused by stage_1.5/1.6
+  // instead of re-spawning madge + secretlint (~5s of duplicate work per run).
+  // The stages here default cwd to '.', so prime the same root. Cleared in
+  // finally — a session outliving the loop would serve stale findings.
+  primeDetectorResultCache('.');
+  try {
+    for (const [name, run] of stages) {
+      const r = run({}) as {
+        pass: boolean;
+        exitCode: number;
+        stderr?: string;
+        findings?: readonly DriftFinding[];
+        disposition?: Disposition;
+      };
+      const label = opts.internal ? name : gateLabel(name);
+      // INVARIANT: exitCode 2 means "skipped" (cladding chose not to run — tool
+      // missing / unknown language). It is NON-blocking. A stage that RAN and
+      // found a real problem MUST return exitCode 1, never 2 — see
+      // stages/util.ts::ranToolResult. (tsc exits 2 on type errors; relaying that
+      // raw 2 here is what let a real type failure pass as a skip.)
+      // Disposition-first (F-e0f6c7): see stages/disposition.ts.
+      const status = gateStatusOf(r);
+      if (isBlocking(status)) {
+        anyFailed = true;
+        worst = Math.max(worst, worstContribution(r, status));
+      }
+      collected.push({stage: name, label, status, exitCode: r.exitCode, stderr: r.stderr, findings: r.findings});
+      if (!opts.json) {
+        pulse(pulseKindOf(status), label);
+        if (isBlocking(status)) printStageDetails(r);
+      }
     }
-    collected.push({stage: name, label, status, exitCode: r.exitCode, stderr: r.stderr, findings: r.findings});
-    if (!opts.json) {
-      pulse(pulseKindOf(status), label);
-      if (isBlocking(status)) printStageDetails(r);
-    }
+  } finally {
+    clearDetectorResultCache();
   }
   // STRICT SKIP-POLICY (F-67d2e9, generalizes the 0.5.x unit-only guard).
   // Under --strict, a skipped stage the spec DEMANDS is a fail: 1.1 when a
@@ -539,12 +566,16 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
       if (!opts.json) pulse('note', 'attestation', 'stale entries re-verified by this run — re-attesting');
     }
     if (!anyFailed) {
-      try {
-        if (writeAttestation('.', loadSpec())) {
-          if (!opts.json) pulse('note', 'attestation', 'spec/attestation.yaml refreshed (verified tree stamped)');
+      if (gitOperationInProgress('.')) {
+        if (!opts.json) pulse('note', 'attestation', 'deferred — git operation in progress; run the gate again after the merge/rebase completes.');
+      } else {
+        try {
+          if (writeAttestation('.', loadSpec())) {
+            if (!opts.json) pulse('note', 'attestation', 'spec/attestation.yaml refreshed (verified tree stamped)');
+          }
+        } catch {
+          /* unloadable spec → nothing to attest */
         }
-      } catch {
-        /* unloadable spec → nothing to attest */
       }
     }
   }
@@ -629,8 +660,16 @@ export function runInferDepsCommand(opts: {ambiguity?: string} = {}): void {
  * ≈1x of naive (code + structured metadata). What the working set sells is the guaranteed
  * budget + the wired needs/breaks/verify context, not raw byte shrink.
  */
-export function runMeasureCommand(opts: {json?: boolean} = {}): void {
+export function runMeasureCommand(opts: {json?: boolean; sessions?: boolean; trend?: boolean | string} = {}): void {
   try {
+    if (opts.sessions) {
+      runSessionsMeasure(opts);
+      return;
+    }
+    if (opts.trend !== undefined && opts.trend !== false) {
+      runTrendMeasure(opts);
+      return;
+    }
     const spec = loadSpec();
     const read = (p: string): string | null => {
       try {
@@ -640,6 +679,10 @@ export function runMeasureCommand(opts: {json?: boolean} = {}): void {
       }
     };
     const r = measureGraphEfficiency(spec, read, '.');
+    // Persist the summary BEFORE printing so the numbers stop evaporating on
+    // stdout (F-39609db4). Best-effort: a failed/deduped write never blocks the
+    // report or changes the exit code.
+    const rec = appendMeasureSnapshot('.', r);
     if (opts.json) {
       process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
     } else {
@@ -655,9 +698,12 @@ export function runMeasureCommand(opts: {json?: boolean} = {}): void {
         `           uncapped structural slice = ${c.medianStructuralRatio}x of naive — the value is the guaranteed budget + wired needs/breaks/verify, not raw shrink`,
         `  search:  median ${r.search.medianDepth} hop(s) resolved (p95 ${r.search.p95Depth}), median ${r.search.medianEdges} edge(s)/feature (max hub ${r.search.maxEdges})`,
         `  stability: median blast-radius coverage ${r.stability.medianCoverage}, median ${r.stability.medianRegressionTests} regression test(s) surfaced; stops ${JSON.stringify(r.stability.byStopReason)}`,
-        `  (deterministic upper bound vs the shard+all-modules baseline — not an agent-adoption measurement)`,
+        `  ${MEASUREMENT_DISCLAIMER}`,
       ];
       process.stdout.write(`${lines.join('\n')}\n`);
+      if (rec.appended) pulse('note', 'measure', 'snapshot recorded to .cladding/measure.jsonl — see `clad measure --trend`');
+      else if (rec.reason === 'deduped') pulse('note', 'measure', 'commit+spec state unchanged since last snapshot — not recorded');
+      else if (rec.reason === 'no_head') pulse('note', 'measure', 'no git HEAD — snapshot not recorded (commit first; a head-less line has no reproduce target)');
     }
     process.exit(0);
   } catch (err) {
@@ -695,7 +741,7 @@ export function runCheckCommand(opts: {internal?: boolean; strict?: boolean; tie
  * so `done` cannot claim more than the gate verifies. @see cli/done.ts
  */
 export function runDoneCommand(featureId: string): void {
-  const r = runDone('.', featureId, {checkStages: runCheckStages, onIndex: writeFeatureIndex});
+  const r = runDone('.', featureId, {checkStages: runCheckStages, onIndex: writeFeatureIndex, gitOpInProgress: gitOperationInProgressName});
   pulse(r.ok ? 'pass' : 'fail', `done · ${featureId}`, r.reason);
   process.exit(r.code);
 }
@@ -788,9 +834,91 @@ function truncate(s: string, max: number): string {
 }
 
 /** Handler for `clad status` (formerly `panel`). Renders the feature × stage integrity matrix. */
-export function runStatusCommand(opts: {internal?: boolean}): void {
+export function runStatusCommand(opts: {internal?: boolean; json?: boolean}): void {
   const spec = loadSpec();
+  if (opts.json) {
+    // AC-e5f48ce5 — expose the SAME row model the ANSI panel renders, from the
+    // split-out builder: one SSoT for terminal, JSON, and the audit bundle.
+    // The row model can exceed the 64KB pipe buffer (200+ features), so write
+    // then let the event loop DRAIN — process.exit() truncates a buffered pipe
+    // mid-write (the latent bug PR #201 fixed for `clad check`).
+    process.stdout.write(`${JSON.stringify(buildPanelModel(spec, '.'), null, 2)}\n`);
+    process.exitCode = 0;
+    return;
+  }
   process.stdout.write(`${renderPanel(spec, '.', {internal: opts.internal})}\n`);
+  process.exit(0);
+}
+
+/** Formats a byte count as a compact human size (B / KB / MB). */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * Handler for `clad bundle --out <file.html> [--since <ref>]` (F-e940fffe).
+ *
+ * Gathers every audit surface — the spec, the feature × stage row model, git
+ * HEAD + version provenance, the capability catalog, and (for the range) the
+ * shipped changes + audit table — then hands the DATA to the pure
+ * buildBundleHtml renderer and writes one self-contained HTML file. All I/O
+ * lives here; the renderer stays pure so a fixed repo state + fixed `now`
+ * yields byte-identical output. A range that cannot be anchored degrades the
+ * changelog + audit sections to an explicit notice, never the whole bundle
+ * (AC-15bb0b99).
+ *
+ * `opts.now` (ISO string) is injectable so tests can pin the one
+ * nondeterministic input; the CLI leaves it undefined → wall clock.
+ */
+export function runBundleCommand(opts: {out?: string; since?: string; cwd?: string; now?: string}): void {
+  const cwd = opts.cwd ?? '.';
+  const out = (opts.out ?? '').trim();
+  if (out.length === 0) {
+    pulse('fail', 'bundle', 'missing --out <file.html> — the bundle needs a destination path');
+    process.exit(1);
+    return;
+  }
+
+  let html: string;
+  try {
+    const spec = loadSpec(cwd);
+    const panel = buildPanelModel(spec, cwd);
+    const provenance = {
+      gitHead: readGitHead(cwd),
+      version: getCurrentCladdingVersion(),
+      generatedAt: opts.now ?? new Date().toISOString(),
+    };
+    const catalogMarkdown = renderCatalog(spec);
+    let changes: BundleChanges;
+    try {
+      const sinceRef = opts.since ?? defaultSinceRef(cwd);
+      const manifest = collectChangelog(cwd, sinceRef);
+      changes = {
+        kind: 'present',
+        sinceRef,
+        changelogMarkdown: renderChangelogMarkdown(manifest),
+        auditMarkdown: renderAuditTable(manifest, spec, cwd),
+      };
+    } catch (err) {
+      changes = {kind: 'omitted', reason: (err as Error).message};
+    }
+    html = buildBundleHtml({spec, panel, provenance, catalogMarkdown, changes});
+  } catch (err) {
+    pulse('fail', 'bundle', (err as Error).message);
+    process.exit(1);
+    return;
+  }
+
+  try {
+    writeFileSync(out, html, 'utf8');
+  } catch (err) {
+    pulse('fail', 'bundle', `could not write ${out}: ${(err as Error).message}`);
+    process.exit(1);
+    return;
+  }
+  pulse('pass', 'bundle', `${out} · ${formatBytes(Buffer.byteLength(html, 'utf8'))}`);
   process.exit(0);
 }
 
@@ -802,30 +930,6 @@ export function runRouteCommand(prompt: string): void {
 }
 
 /**
- * 0.6.0 verb renames (alias-and-deprecate, docs/glossary.md). Commander keeps
- * the old spellings working via `.alias()`; this map only powers the one-line
- * stderr deprecation notice. The old verbs are removed in 0.8 (still shipped through 0.7.x).
- */
-export const RENAMED_VERBS: Readonly<Record<string, string>> = {
-  refine: 'clarify',
-  panel: 'status',
-  drive: 'run',
-};
-
-/**
- * Prints the one-line deprecation notice when the invoked verb is a 0.6.0
- * alias (`clad panel` → "'panel' is now 'status'"). stderr, never stdout —
- * `--json` consumers and MCP stdio traffic stay clean.
- */
-export function printVerbDeprecationNotice(verb: string | undefined): void {
-  const replacement = verb ? RENAMED_VERBS[verb] : undefined;
-  if (!replacement) return;
-  process.stderr.write(
-    `cladding: '${verb}' is now '${replacement}' — the old verb is removed in 0.8\n`,
-  );
-}
-
-/**
  * Builds the commander Program with every verb wired up. Exported so
  * unit tests can invoke specific subcommands via
  * `createProgram().parse([verb, ...args], {from: 'user'})` without
@@ -833,7 +937,7 @@ export function printVerbDeprecationNotice(verb: string | undefined): void {
  */
 export function createProgram(): Command {
   const program = new Command();
-  program.name('clad').description('Reference Ironclad CLI').version('0.7.1');
+  program.name('clad').description('Reference Ironclad CLI').version('0.8.1');
 
   program
     .command('init [intent...]')
@@ -854,7 +958,6 @@ export function createProgram(): Command {
 
   program
     .command('run [goal]')
-    .alias('drive') // 0.6.0 rename — `drive` is removed in 0.8
     .description('(experimental) Headless autonomous loop — iterate ready features, dispatch developer + reviewer personas, run L1 gates, record evidence. The supported, exercised path is host-delegated (clad serve + your AI host loops the cadence); this loop needs a real LLM transport and is not auto-invoked')
     .option('--cwd <path>', 'target project directory (default cwd)')
     .option('--max-iterations <n>', 'cap iterations (default 50)', '50')
@@ -923,9 +1026,9 @@ export function createProgram(): Command {
 
   program
     .command('status')
-    .alias('panel') // 0.6.0 rename — `panel` is removed in 0.8
     .description('Render the feature × stage integrity matrix (business titles; use --internal for raw F-NNN ids)')
     .option('--internal', 'show internal F-NNN ids and stage codes')
+    .option('--json', 'emit the row model as JSON — the same feature × stage integrity matrix rendered to the terminal (columns + per-feature glyph cells), one SSoT for terminal, JSON, and the audit bundle')
     .action(runStatusCommand);
 
   program
@@ -948,7 +1051,9 @@ export function createProgram(): Command {
   program
     .command('measure')
     .description('Report the search + context efficiency the graph provides per feature — working-set tokens vs the naive baseline, dependency depth/edges resolved, regression-set coverage (F-16138071). Deterministic; no agent.')
-    .option('--json', 'emit the full per-feature report as JSON')
+    .option('--json', 'emit the full report as JSON')
+    .option('--sessions', 'summarize recorded value-delivery telemetry instead — impact-card fire rate over eligible edits, the per-reason skip histogram, and MCP read-serve counts. Measures DELIVERY (did the surfaces fire), NOT adoption (F-6ba22c5c).')
+    .option('--trend [n]', 'render the last N (default 5) recorded measure snapshots with signed deltas — spot efficiency drift over time from the deduped .cladding/measure.jsonl ledger (F-39609db4)')
     .action((opts) => runMeasureCommand(opts));
 
   const graph = program
@@ -986,7 +1091,43 @@ export function createProgram(): Command {
     .option('--json', 'print the deterministic ChangelogManifest as JSON (byte-identical across runs on the same state)')
     .option('--audit', 'print the audit table — feature | AC | EARS | verification refs, each marked resolved ✓/✗')
     .option('--catalog', 'print the full capability → feature → acceptance listing of the living spec (no git range)')
-    .action((opts: {since?: string; json?: boolean; audit?: boolean; catalog?: boolean}) => runChangelogCommand(opts));
+    .option(
+      '--measure',
+      "embed the release's own re-derivable measurement — but ONLY a snapshot taken at the current HEAD; " +
+        'no match renders a not-measured notice, never an older snapshot (F-ede6fa75)',
+    )
+    .action((opts: {since?: string; json?: boolean; audit?: boolean; catalog?: boolean; measure?: boolean}) =>
+      runChangelogCommand(opts),
+    );
+
+  program
+    .command('report')
+    .description(
+      'Render one deterministic review packet for a git range (F-f6cc5e5a) — spec-shard movement (from the ' +
+        'changelog), changed source files resolved to their owning features via the reverse index, the deduped ' +
+        'regression set, and gate + attestation state. For PR reviewers, team-leads, and auditors: it RENDERS, it ' +
+        'gates nothing. Byte-identical across two runs on the same repository state.',
+    )
+    .option('--since <ref>', 'git ref to diff from (default: the latest tag via `git describe --tags --abbrev=0`)')
+    .option(
+      '--format <fmt>',
+      'md (default, the four-section markdown packet) | sarif (SARIF 2.1.0 — one result per error/warn drift ' +
+        'finding, for code-scanning UIs) | json (the raw deterministic model)',
+    )
+    .action((opts: {since?: string; format?: string}) => runReportCommand(opts));
+
+  program
+    .command('bundle')
+    .description(
+      'Write ONE self-contained HTML audit bundle (F-e940fffe) a non-coder can double-click — offline, zero ' +
+        'network, no CDN, no scripts. Contains the project header + inventory, the feature × stage matrix, the ' +
+        'capability catalog, shipped changes for the range, the audit table with resolved refs, and the attestation ' +
+        'summary, under a provenance banner (git HEAD, date, version). Deterministic modulo the date stamp. If no ' +
+        'anchor ref resolves, the changelog + audit sections show an omitted notice while the rest still renders.',
+    )
+    .requiredOption('--out <file.html>', 'destination path for the HTML bundle')
+    .option('--since <ref>', 'git ref to diff shipped changes from (default: the latest tag via `git describe --tags --abbrev=0`)')
+    .action((opts: {out?: string; since?: string}) => runBundleCommand(opts));
 
   program
     .command('route <prompt>')
@@ -1013,11 +1154,19 @@ export function createProgram(): Command {
     .description('Summarise .cladding/events.log.jsonl — sentinel-miss frequency by phase/cause/fallback plus the top missed sentinels (LLM dispatcher health check)')
     .option('--cwd <path>', 'project directory to read events from (default cwd)')
     .option('--json', 'emit the raw DoctorReport for tooling; default is the human-readable surface')
-    .action(runDoctorCommand);
+    .option('--hosts', 'smoke-test host CLIs (claude/gemini/codex) + Cursor wiring → dated artifact + docs/dogfood/matrix.md. Live LLM prompts run only with consent (CLAD_HOST_SMOKE=1 or --yes); otherwise not-run')
+    .option('--yes', 'grant live-run consent for --hosts (equivalent to CLAD_HOST_SMOKE=1)')
+    .option('--matrix-only', 'regenerate docs/dogfood/matrix.md from the newest host-smoke artifact without any probing')
+    .action((opts) => {
+      if (opts.hosts || opts.matrixOnly) {
+        runDoctorHosts({cwd: opts.cwd, yes: opts.yes, matrixOnly: opts.matrixOnly});
+        return;
+      }
+      runDoctorCommand(opts);
+    });
 
   program
     .command('clarify [answer...]')
-    .alias('refine') // 0.6.0 rename — `refine` is removed in 0.8
     .description(
       'Advance the onboarding Q&A loop. Pass the user\'s answer to the next pending question as a positional ' +
         '(no quotes needed, e.g. `clad clarify 법인 사업자만`); the LLM refines spec/docs based on the full Q-A ' +
@@ -1041,6 +1190,5 @@ export function createProgram(): Command {
 const isBundled = Boolean((globalThis as {__CLADDING_BUNDLED?: boolean}).__CLADDING_BUNDLED);
 const isCliEntry = isBundled || import.meta.url === `file://${process.argv[1]}`;
 if (isCliEntry) {
-  printVerbDeprecationNotice(process.argv[2]);
   createProgram().parse();
 }
