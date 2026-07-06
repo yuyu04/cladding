@@ -1,210 +1,3 @@
-# Cladding · Tier C — verification attestation (GREEN strict pre-push gate). Do not edit by hand.
-# One line per done feature: sha256 tree-hash of its modules at the last
-# attested verification. STALE_ATTESTATION compares; `clad check
-# --tier=pre-push --strict` GREEN refreshes. Content-anchored: survives
-# fresh clones and squash/rebase (suggested .gitattributes: merge=union).
-attested:
-  F-001: 1eb56cee6b065fbe
-  F-002: c116a9d32f862ee9
-  F-003: c9578f9a6e70dcdf
-  F-004: 791125e674b98fb5
-  F-005: 70c3b7166f297bff
-  F-006: 488cb6f2d452a286
-  F-007: d1c159c46d5a454f
-  F-008: 86cb22d725182847
-  F-009: 80831c8be1440e79
-  F-00eb1a: bdae5f86a3688e23
-  F-010: 049a2581168f569f
-  F-011: efd71e966a937fab
-  F-012: e009b9eb07addd30
-  F-013: 082bfb079fecf10b
-  F-0144b9: f6844cefd13558a6
-  F-014: 00bab4a06108f736
-  F-015: 7152b82df32808d7
-  F-016: 26a5ad16a7b1be3c
-  F-017: 919a58ec47735504
-  F-018: a4c997fd2e8a8a22
-  F-019: 722e8bf2c8e0b41c
-  F-020: 2c5f4a94e3e57e9b
-  F-021: 8a1a82a59a1c45c7
-  F-022: 8f596a1c737f6d42
-  F-02343cd1: ef8aab92031314d2
-  F-023: 0c14948e5a91bb0f
-  F-024: f67a86816b06f8ee
-  F-025: 187339b684896b8e
-  F-026: bb35faf43ba582cb
-  F-027: 7f4b1a055f141bb7
-  F-028: c53b0e2b7682ad45
-  F-029: 47a06c8f40f48f63
-  F-030: a88a59e1c9425471
-  F-031: ce88aa5dd350aaf7
-  F-032: bc595695024d7867
-  F-033: 3177e977ab79eca7
-  F-034: 848cb1fa18cb21ec
-  F-035: fb4a11bd47de8e4b
-  F-036: 13bab7557e1ea56e
-  F-037: 7f811c5c8bc0e8e3
-  F-038: 1338100beadb15a6
-  F-039: 2e60f3d899b72d7f
-  F-040: 0022fc69f6ab5be9
-  F-041: cddb50fc41e49066
-  F-042: 21fd643c1075e1e0
-  F-043: 2c5f4a94e3e57e9b
-  F-044: 57bd262844251108
-  F-045: b494c9a80442ac20
-  F-046: c3550239e0810df9
-  F-047: baf5a2dbb9bb5a4b
-  F-048: c8859485e94864b0
-  F-049: 658fb15d50247487
-  F-051: 26a087cb075c3518
-  F-052: 61e043371b9f7c71
-  F-053: 13a90cd08aec07ae
-  F-054: 5f5d30500bd8cd7f
-  F-055: 157fca55d153df4e
-  F-056: bd6fbdcb028e67f2
-  F-057: dff230897a1dbf01
-  F-058: b52029e9eb5fd2e9
-  F-059: 140dab087ebf5346
-  F-060: 96dc261212a0dd3d
-  F-061: c16123610e8fe7fc
-  F-062: 0ab83282a7f7b1ef
-  F-063: 19728e2f609c6e83
-  F-064: e4f9fdc234fff67e
-  F-065: e6ed3ef916201947
-  F-066: f6da66519e2493b3
-  F-067: 6e6dbd05bf314b56
-  F-068: 058091774fa65ef8
-  F-069: 0c49c2c52b8f6e2e
-  F-06dfdad6: a552110bf0b40469
-  F-070: 47cae85910b68857
-  F-071: ce7d4e7da8d2e2b6
-  F-072: 3c942a335be93c66
-  F-073: a8a4d62847d4421d
-  F-074: 2f9e24856e9409cb
-  F-075: acd7b14bb764e08b
-  F-076: a1a83ee1367c9a62
-  F-077: b05585ff764719ca
-  F-078: b00a896e952776b8
-  F-079: c4a31cfa2a639cdd
-  F-080: 1c19da74d32894e6
-  F-081: 248f9660cfb1b02b
-  F-098d3b: 42d61bf806ce462b
-  F-09d68b: b409afb6e47d1001
-  F-0ed2db: f94e2f45a16ff99c
-  F-0f2984d0: 9a54160a1ad31390
-  F-12d740: 70ef1dfb95920eca
-  F-15999130: 894b484b7a93690c
-  F-16138071: d59e2605e3dcaba5
-  F-16746b: ffac59d91b9f67b9
-  F-17df0a: 8e733659cc1a929a
-  F-18e951: d907c170a230e052
-  F-1c9166: 6b32b5f8dcae9663
-  F-1d23a6: 9f6255b60fea3094
-  F-1edb38: 4ddc2b7e58db6fc9
-  F-24062d: 805125645f7661ff
-  F-245bd5: a8372aeb83acc411
-  F-2be3e3bb: 9a54160a1ad31390
-  F-2de65d: 70ef1dfb95920eca
-  F-315fd7: c3b042c80fa7c187
-  F-31eeb8: d88a9880d29ae411
-  F-32b1e0: dfa4c54eacdbf53c
-  F-36f11b: 1878227f3a7a88b1
-  F-3788c2: af9778dea8687b29
-  F-37b4a8: e067655bad681488
-  F-3a5339: afb786a01e036eb2
-  F-3b3690: 6a36aad282d36f3a
-  F-40327b: 8295358f7b813c8a
-  F-417ff0: 7c69675a93a76222
-  F-42af48: 7702447a407758a1
-  F-43d8e3: bbea25941e2b675d
-  F-4747ef: 3c705707ae1698ca
-  F-4d87321f: 70ef1dfb95920eca
-  F-4db939: b2c386ca4e18c117
-  F-50ff43: fac674314685a912
-  F-551a1c: 29d021f9f2993cca
-  F-569f4b37: 9d7cf792bf270ce5
-  F-56abaa: a7dea8745a8b3235
-  F-570a3f: 5e39856f9d2aa4b1
-  F-59f093: 26735424fba6308c
-  F-5b188856: d1e2e4184aa76c12
-  F-5b9f9f: 4ef750f96002a754
-  F-5d3ed2: a18760a1d1ce3969
-  F-5f6b45: 63e3846f5f9b8c3d
-  F-60b842: a9fc824ffcb178f4
-  F-64a5c159: a8afca34fb00d0f3
-  F-65814a: e98d1eb48ffd88e0
-  F-67d2e9: d2f84f17aa36ae99
-  F-67e33f: 679be18899f2ed8f
-  F-6aebb9: 437fe1a3dc065ab3
-  F-6d943d: 2b53bfced7b1e70d
-  F-6f80e7: 0c0e5b71ae22cc26
-  F-7076f7: 7e819e0d440f3ffe
-  F-7794a6bc: 01f721a95af19e48
-  F-77f7ead0: 4fd1ec36a5726fe9
-  F-78b50d: 688e6afe2352a034
-  F-7afbd4: 18ce48352bee0fce
-  F-7ce18e: a8cc9f1472ff5698
-  F-7fa4a7: 19b7709a0b2202e3
-  F-80d19d: 0af475d017d8247f
-  F-836a90: 202d204521160071
-  F-8f419e: f3473746f4e252bc
-  F-904495a5: b290a98b9decc1f1
-  F-9064ff: 410b0478070cdd8f
-  F-94dda4: 8dfb0267c45534f9
-  F-95a096: e8ed4fb958234914
-  F-96250595: 41b790c427d2b01b
-  F-96700032: 5ae97b4c82c14acc
-  F-99c6e5: 8a7ec9d52170148f
-  F-9a3b61: 0de0d6f24bc53d67
-  F-9b643e: 1140b97aa07414f5
-  F-9d168287: a7f7788dea42b0d9
-  F-a04cd9: e65d87671306d305
-  F-a4b512: d136f2a1bbc4383a
-  F-a5228c: a577e4a2a2f0c0ff
-  F-aa7197: 7f561e4f3c902716
-  F-ae61c1: 7c3c8622e5375754
-  F-aee1da: 2537008f70fd6253
-  F-aee61f: e009b9eb07addd30
-  F-af45042a: 17c898c92c9ac27e
-  F-af96b1: 108264660d611b56
-  F-b2094740: f379bf4feef6771a
-  F-b43066: 3ca20456fac8a814
-  F-b61449: 7095ce00662e987d
-  F-b84c38: ad2bb96efa9dbf54
-  F-b99577: fc7df479ea92f0dd
-  F-ba2e05: 158e77c8af32514a
-  F-ba4b7a: be5698e578718404
-  F-bb15e6: ea9b217fd8ac6fe0
-  F-bd07d7: 9764e0319a4ec866
-  F-bdcd90: e19b8ee840ef58c4
-  F-c037ae: 0601d791da73a6f3
-  F-c2c996: d70ed52d4d2c04d0
-  F-c48eb2: c9e1d15297313286
-  F-c4c5ae: 18200d79542ae22e
-  F-c6a32fff: 00f44ae222503b95
-  F-c8aef8: 28d19a76eb528438
-  F-cd0415: 9cf6ce40e2a8b381
-  F-cfba0c: f488e0d35fb34005
-  F-d12edf: 301f29c842cb0c89
-  F-d2c806: 1cf20a658d36f4db
-  F-d3bde4: 8e733659cc1a929a
-  F-d49585: ca1e61197a081bd6
-  F-d6b93648: 2fe6553653e77d94
-  F-d7312b: d5592f2eb809487f
-  F-d8223c: 0501e9564231899b
-  F-d980359c: 8f1559276afc5c03
-  F-dd51b42c: 496eeffa2641169d
-  F-dddb89: f5625354e55eba9b
-  F-e0f6c7: 36f3f085741af993
-  F-ea1f13: 1740763a489c438f
-  F-eb732f: d8abb536ff850a7a
-  F-ee47fc2b: adb87c97b8ccf6e1
-  F-ee5f643e: cf9efe9caa0956af
-  F-ef2fd9: b3a1dcd1e750a714
-  F-f334fa: 5207f35968a0c9b2
-  F-f44d1b: 62e0779d9c0ef11f
-  F-f6d13e: fb5c242416832024
-  F-fcece7: 8133689094f1197b
 # Cladding · Tier C — verification attestation (v2). Written ONLY by a GREEN
 # `clad check --tier=pre-push --strict` gate — the file's one honest author.
 # Do not edit by hand.
@@ -224,14 +17,14 @@ attested_modules:
   .claude-plugin/marketplace.json: 90c522016beb7fd6
   .claude/settings.json: d0bba3583aef0960
   .github/workflows/ci.yml: 8ea99219cb80df60
-  .gitignore: 1294975ba3b47043
+  .gitignore: 4e5899550999ddc8
   CHANGELOG.md: 9d555731b158eed9
   CLAUDE.md: 9d00a2ef785a76d1
   GOVERNANCE.md: 21cc28eaaf637a20
   README.html: 0458909731d3b683
   README.ko.html: 2dac07525d09fca3
-  README.ko.md: 9f103b2ab73bf2cd
-  README.md: 97d366f5dbeac39d
+  README.ko.md: 4ccdad2e38cbb565
+  README.md: a5270ccc110533e3
   SECURITY.md: df1d0c80304b2f28
   bin/clad: 77b80666665dd1b0
   conformance/fixtures.yaml: 7db2915eeaefbc2f
@@ -259,7 +52,7 @@ attested_modules:
   docs/dogfood/claude-code-2026-05-20.md: 04870d41e75576d6
   docs/dogfood/gemini-cli-2026-05-20.md: 2da1ba66c4f108f0
   docs/feature-cycle.md: 49672a8cee9b1191
-  docs/glossary.md: 1fa1a5cdecac2c34
+  docs/glossary.md: ded8d10136bf177a
   docs/img/en/ecosystem.svg: 686fb1eb2b93711c
   docs/img/en/relationship.svg: 67470f930df33119
   docs/img/ko/ecosystem.svg: 7c9b2d68fdaa70cf
@@ -312,7 +105,7 @@ attested_modules:
   skills/serve/SKILL.md: 4cee65dfb691e3b0
   skills/status/SKILL.md: b3cb6e7a12bf4023
   skills/sync/SKILL.md: 709c20212aa5627e
-  spec.yaml: 1273f772a301095a
+  spec.yaml: 78d7949f42249293
   spec/README.md: 7c257426396d435c
   spec/architecture.yaml: c5d911049fbdcd48
   spec/features/: a4d0f0eb87fed960
@@ -329,8 +122,8 @@ attested_modules:
   src/adapters/host/sampling-context.ts: 205cb5734072d638
   src/adapters/host/transport.ts: d284372b247bd27d
   src/adapters/index.ts: 8b4c3c29a6de75aa
-  src/adapters/sdk/anthropic.ts: 9debe5cc61f039f1
-  src/adapters/types.ts: f8e5643231a13e8d
+  src/adapters/sdk/anthropic.ts: 1b77b2dbc73a9e84
+  src/adapters/types.ts: 59a12bbca0601944
   src/agents: a4d0f0eb87fed960
   src/agents/README.md: 9f41809958439db2
   src/agents/blind-author.md: c4c89882adce01ce
@@ -353,7 +146,7 @@ attested_modules:
   src/cli/graph-serve.ts: 23e6e389225d0f98
   src/cli/graph.ts: bab410061b8c746a
   src/cli/hook.ts: bc05844317f377c4
-  src/cli/init.ts: eec7319d9f2496c0
+  src/cli/init.ts: 71f2c08113f6b22b
   src/cli/intent-from-path.ts: e69862821d979f22
   src/cli/measure.ts: 3a562f16589e26c2
   src/cli/report.ts: 911f859b2446834b
@@ -365,11 +158,12 @@ attested_modules:
   src/cli/scan/greenfield-seeds.ts: ff462b4a19f081f3
   src/cli/scan/helpers.ts: 396c73992ded0e22
   src/cli/scan/index.ts: c23f21c487c8abcb
-  src/cli/scan/intent-onboarding.ts: bfc6960b621e0966
+  src/cli/scan/intent-onboarding.ts: 46d6e2f3d060d5ca
   src/cli/scan/llm.ts: 74ac7ce670001de6
   src/cli/scan/onboarding-state.ts: a5e8513fc8355e6e
   src/cli/scan/roots.ts: 7475eed8c9836531
   src/cli/scan/scenarios.ts: 6c2a4ce3b469a668
+  src/cli/scan/spec-lang.ts: acdbe035a63396d8
   src/cli/scan/stats.ts: 00c737b7b7acad97
   src/cli/scan/thresholds.ts: ec0047b894a6aa6a
   src/cli/scan/types.ts: ea0170aa88c1c14a
@@ -382,9 +176,9 @@ attested_modules:
   src/drive: a4d0f0eb87fed960
   src/drive/agent.ts: 8daf2728db01a8c9
   src/drive/halt.ts: 386dd57f84f8e297
-  src/drive/loop.ts: c37e15ece8e2ae41
+  src/drive/loop.ts: 51cf1386a8640f50
   src/events: a4d0f0eb87fed960
-  src/events/log.ts: dcef5c4cccd5ed9c
+  src/events/log.ts: 98ea4c27e3cad96c
   src/events/session-report.ts: d0b34f848c360334
   src/graph/layout3d.ts: fdbf08bacad2c049
   src/graph/model.ts: 9dfae1cb48bfe3d5
@@ -403,12 +197,17 @@ attested_modules:
   src/init/host-setup.ts: 7204682817a119f1
   src/optimizer: a4d0f0eb87fed960
   src/optimizer/code-excerpt.ts: e2c4598efcd28d2a
+  src/optimizer/compress-native.ts: af99b3b3fc1b238a
+  src/optimizer/compress-types.ts: eab781281b3b3149
   src/optimizer/context-slice.ts: b5864aaed1e7ae48
+  src/optimizer/headroom.ts: 921d1f118f4cffba
   src/optimizer/infer-depends-on.ts: 511d626a96b3da90
   src/optimizer/iterative-slice.ts: 67f8bcd4471eaeb9
+  src/optimizer/lang-normalize.ts: 35868b3354a5579f
   src/optimizer/measure-ledger.ts: 1e644cacaf878527
   src/optimizer/measurement.ts: 55ab003adaec49a9
   src/optimizer/preamble.ts: f74d41daf8372cdf
+  src/optimizer/profiles.ts: 5762c3f4ef1f79d1
   src/optimizer/prune.ts: f5f70fb850f167bc
   src/optimizer/push-card.ts: 860b5ac68f2db77e
   src/optimizer/reverse-slice.ts: 81c2e99e65bdd359
@@ -517,7 +316,7 @@ attested_modules:
   src/ui/panel.ts: 8b78cb14dafb28fb
   src/ui/pulse.ts: ee4255f5c6e49f51
   src/ui/softShell.ts: 5153baee37ce3403
-  tests/adapters/anthropic.test.ts: fa2fc7faf032a782
+  tests/adapters/anthropic.test.ts: 612e8d3f6ffc9b50
   tests/adapters/index.test.ts: 4454e6b4ea05a74f
   tests/adapters/transport.test.ts: 68f22e9e8df7b813
   tests/agents/loader.test.ts: a7df7b1c9a95d37d
@@ -527,7 +326,7 @@ attested_modules:
   tests/cli/init.test.ts: 3428a89708fc9330
   tests/cli/intent-onboarding.test.ts: 0681b98ce2e74c22
   tests/conformance/registry.test.ts: 018b1e5c0d8d4baf
-  tests/drive/loop.test.ts: ae49bcfa745a8cdb
+  tests/drive/loop.test.ts: dd3188240d7893d4
   tests/events/log.test.ts: 15e6d04c72431bfb
   tests/init/git-hook.test.ts: cef479cfb759bbe8
   tests/integration/loop-real-transport.test.ts: 7bd5bfa97eca28c6
@@ -728,6 +527,7 @@ attested_features:
   F-31eeb8: ok
   F-32b1e0: ok
   F-35954d19: ok
+  F-36f11b: ok
   F-3788c2: ok
   F-37b4a8: ok
   F-39609db4: ok
@@ -740,6 +540,7 @@ attested_features:
   F-43d8e3: ok
   F-4747ef: ok
   F-49facde9: ok
+  F-4d87321f: ok
   F-4db939: ok
   F-4ef09f38: ok
   F-50ff43: ok
@@ -753,11 +554,13 @@ attested_features:
   F-5b9f9f: ok
   F-5d3ed2: ok
   F-5f6b45: ok
+  F-60b842: ok
   F-63b989e5: ok
   F-64a5c159: ok
   F-65814a: ok
   F-67d2e9: ok
   F-67e33f: ok
+  F-6aebb9: ok
   F-6ba22c5c: ok
   F-6d943d: ok
   F-6e49fd24: ok
@@ -836,6 +639,7 @@ attested_features:
   F-e7d59c88: ok
   F-e803c149: ok
   F-e940fffe: ok
+  F-ea1f13: ok
   F-eb732f: ok
   F-ede6fa75: ok
   F-ee47fc2b: ok

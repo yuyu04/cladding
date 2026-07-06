@@ -115,8 +115,8 @@ features:
   F-315fd7: {slug: scenario-coverage-detector, status: done, modules: 2}
   F-31eeb8: {slug: scan-bfs-walk, status: done, modules: 2}
   F-32b1e0: {slug: ai-hints-preferred-patterns, status: done, modules: 6}
-  F-36f11b: {slug: english-canonical-spec-localized-view, status: done, modules: 5}
   F-35954d19: {slug: post-tool-mini-working-set, status: done, modules: 4}
+  F-36f11b: {slug: english-canonical-spec-localized-view, status: done, modules: 5}
   F-3788c2: {slug: planned-backlog-detector, status: done, modules: 2}
   F-37b4a8: {slug: feature-index-file, status: done, modules: 3}
   F-39609db4: {slug: measure-ledger, status: done, modules: 2}
@@ -128,8 +128,8 @@ features:
   F-42af48: {slug: architecture-from-spec, status: done, modules: 2}
   F-43d8e3: {slug: smoke-probe-token-pass, status: done, modules: 3}
   F-4747ef: {slug: ssot-lifecycle-tests, status: done, modules: 9}
-  F-4d87321f: {slug: drive-gate-failure-injection, status: done, modules: 1}
   F-49facde9: {slug: loop-engineering-readme, status: done, modules: 4}
+  F-4d87321f: {slug: drive-gate-failure-injection, status: done, modules: 1}
   F-4db939: {slug: ab-evaluation, status: done, modules: 9}
   F-4ef09f38: {slug: multi-probe-smoke, status: done, modules: 3}
   F-50ff43: {slug: meta-integrity-skip-when-absent, status: done, modules: 2}
@@ -226,11 +226,11 @@ features:
   F-dd51b42c: {slug: kotlin-first-class-toolchain, status: done, modules: 11}
   F-dddb89: {slug: ears-validation-at-creation, status: done, modules: 4}
   F-e0f6c7: {slug: smoke-disposition-spine, status: done, modules: 3}
-  F-ea1f13: {slug: world-language-detection, status: done, modules: 2}
   F-e53596dd: {slug: gate-run-detector-cache, status: done, modules: 7}
   F-e7d59c88: {slug: bash-edit-blind-spot, status: done, modules: 2}
   F-e803c149: {slug: b1-adoption-protocol, status: done, modules: 3}
   F-e940fffe: {slug: audit-bundle-html, status: done, modules: 3}
+  F-ea1f13: {slug: world-language-detection, status: done, modules: 2}
   F-eb732f: {slug: spec-authoring-anti-hollow, status: done, modules: 2}
   F-ede6fa75: {slug: self-measuring-release, status: done, modules: 3}
   F-ee47fc2b: {slug: reverse-index-core, status: done, modules: 1}
