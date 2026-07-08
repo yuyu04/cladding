@@ -17,14 +17,14 @@ attested_modules:
   .claude-plugin/marketplace.json: 4875265deab1e487
   .claude/settings.json: d0bba3583aef0960
   .github/workflows/ci.yml: 8ea99219cb80df60
-  .gitignore: 1294975ba3b47043
+  .gitignore: 4e5899550999ddc8
   CHANGELOG.md: 0c0ce6ff13bd4167
   CLAUDE.md: d81d8832976cd5ee
   GOVERNANCE.md: 21cc28eaaf637a20
   README.html: 48b4bd35908408db
   README.ko.html: bdb58f0418820473
-  README.ko.md: 7610ca3b72d7933c
-  README.md: dd86f6d6d1899f97
+  README.ko.md: 07ead88e3fc66485
+  README.md: e88ba330060d13e6
   SECURITY.md: df1d0c80304b2f28
   bin/clad: 77b80666665dd1b0
   conformance/fixtures.yaml: 4b1b94dae1cd20b0
@@ -52,7 +52,7 @@ attested_modules:
   docs/dogfood/claude-code-2026-05-20.md: 04870d41e75576d6
   docs/dogfood/gemini-cli-2026-05-20.md: 2da1ba66c4f108f0
   docs/feature-cycle.md: 6af4ff8fe15db28a
-  docs/glossary.md: 1fa1a5cdecac2c34
+  docs/glossary.md: ded8d10136bf177a
   docs/img/en/ecosystem.svg: 686fb1eb2b93711c
   docs/img/en/relationship.svg: 67470f930df33119
   docs/img/ko/ecosystem.svg: 7c9b2d68fdaa70cf
@@ -105,7 +105,7 @@ attested_modules:
   skills/serve/SKILL.md: 4cee65dfb691e3b0
   skills/status/SKILL.md: b3cb6e7a12bf4023
   skills/sync/SKILL.md: 709c20212aa5627e
-  spec.yaml: ac14df7ad5345d0f
+  spec.yaml: 1c78f0a81a620856
   spec/README.md: 7c257426396d435c
   spec/architecture.yaml: c5d911049fbdcd48
   spec/features/: a4d0f0eb87fed960
@@ -122,8 +122,8 @@ attested_modules:
   src/adapters/host/sampling-context.ts: 205cb5734072d638
   src/adapters/host/transport.ts: d284372b247bd27d
   src/adapters/index.ts: 8b4c3c29a6de75aa
-  src/adapters/sdk/anthropic.ts: 9debe5cc61f039f1
-  src/adapters/types.ts: f8e5643231a13e8d
+  src/adapters/sdk/anthropic.ts: 1b77b2dbc73a9e84
+  src/adapters/types.ts: 59a12bbca0601944
   src/agents: a4d0f0eb87fed960
   src/agents/README.md: 9f41809958439db2
   src/agents/blind-author.md: c4c89882adce01ce
@@ -146,7 +146,7 @@ attested_modules:
   src/cli/graph-serve.ts: 23e6e389225d0f98
   src/cli/graph.ts: bab410061b8c746a
   src/cli/hook.ts: a856ab95e025bb75
-  src/cli/init.ts: eec7319d9f2496c0
+  src/cli/init.ts: 71f2c08113f6b22b
   src/cli/intent-from-path.ts: e69862821d979f22
   src/cli/measure.ts: 3a562f16589e26c2
   src/cli/report.ts: 911f859b2446834b
@@ -158,11 +158,12 @@ attested_modules:
   src/cli/scan/greenfield-seeds.ts: ff462b4a19f081f3
   src/cli/scan/helpers.ts: 396c73992ded0e22
   src/cli/scan/index.ts: c23f21c487c8abcb
-  src/cli/scan/intent-onboarding.ts: bfc6960b621e0966
+  src/cli/scan/intent-onboarding.ts: 46d6e2f3d060d5ca
   src/cli/scan/llm.ts: e6a91e97f9873531
   src/cli/scan/onboarding-state.ts: a5e8513fc8355e6e
   src/cli/scan/roots.ts: 7475eed8c9836531
   src/cli/scan/scenarios.ts: 6c2a4ce3b469a668
+  src/cli/scan/spec-lang.ts: acdbe035a63396d8
   src/cli/scan/stats.ts: 00c737b7b7acad97
   src/cli/scan/thresholds.ts: ec0047b894a6aa6a
   src/cli/scan/types.ts: ea0170aa88c1c14a
@@ -175,9 +176,9 @@ attested_modules:
   src/drive: a4d0f0eb87fed960
   src/drive/agent.ts: 8daf2728db01a8c9
   src/drive/halt.ts: 386dd57f84f8e297
-  src/drive/loop.ts: c37e15ece8e2ae41
+  src/drive/loop.ts: 51cf1386a8640f50
   src/events: a4d0f0eb87fed960
-  src/events/log.ts: dcef5c4cccd5ed9c
+  src/events/log.ts: 98ea4c27e3cad96c
   src/events/session-report.ts: d0b34f848c360334
   src/graph/layout3d.ts: fdbf08bacad2c049
   src/graph/model.ts: 9dfae1cb48bfe3d5
@@ -196,12 +197,17 @@ attested_modules:
   src/init/host-setup.ts: ee6bca9c8fbc2fb2
   src/optimizer: a4d0f0eb87fed960
   src/optimizer/code-excerpt.ts: e2c4598efcd28d2a
+  src/optimizer/compress-native.ts: af99b3b3fc1b238a
+  src/optimizer/compress-types.ts: eab781281b3b3149
   src/optimizer/context-slice.ts: b5864aaed1e7ae48
+  src/optimizer/headroom.ts: 921d1f118f4cffba
   src/optimizer/infer-depends-on.ts: 511d626a96b3da90
   src/optimizer/iterative-slice.ts: 67f8bcd4471eaeb9
+  src/optimizer/lang-normalize.ts: 35868b3354a5579f
   src/optimizer/measure-ledger.ts: 1e644cacaf878527
   src/optimizer/measurement.ts: 55ab003adaec49a9
   src/optimizer/preamble.ts: f74d41daf8372cdf
+  src/optimizer/profiles.ts: 5762c3f4ef1f79d1
   src/optimizer/prune.ts: f5f70fb850f167bc
   src/optimizer/push-card.ts: c7cc2d710fcfd1dc
   src/optimizer/reverse-slice.ts: 81c2e99e65bdd359
@@ -311,7 +317,7 @@ attested_modules:
   src/ui/panel.ts: 8b78cb14dafb28fb
   src/ui/pulse.ts: ee4255f5c6e49f51
   src/ui/softShell.ts: c095f4185ab3d624
-  tests/adapters/anthropic.test.ts: fa2fc7faf032a782
+  tests/adapters/anthropic.test.ts: 612e8d3f6ffc9b50
   tests/adapters/index.test.ts: 4454e6b4ea05a74f
   tests/adapters/transport.test.ts: 68f22e9e8df7b813
   tests/agents/loader.test.ts: a7df7b1c9a95d37d
@@ -321,7 +327,7 @@ attested_modules:
   tests/cli/init.test.ts: 3428a89708fc9330
   tests/cli/intent-onboarding.test.ts: 0681b98ce2e74c22
   tests/conformance/registry.test.ts: 018b1e5c0d8d4baf
-  tests/drive/loop.test.ts: ae49bcfa745a8cdb
+  tests/drive/loop.test.ts: dd3188240d7893d4
   tests/events/log.test.ts: 15e6d04c72431bfb
   tests/init/git-hook.test.ts: cef479cfb759bbe8
   tests/integration/loop-real-transport.test.ts: 7bd5bfa97eca28c6
@@ -523,6 +529,7 @@ attested_features:
   F-31eeb8: ok
   F-32b1e0: ok
   F-35954d19: ok
+  F-36f11b: ok
   F-3788c2: ok
   F-37b4a8: ok
   F-39609db4: ok
@@ -535,6 +542,7 @@ attested_features:
   F-43d8e3: ok
   F-4747ef: ok
   F-49facde9: ok
+  F-4d87321f: ok
   F-4db939: ok
   F-4ef09f38: ok
   F-50ff43: ok
@@ -549,11 +557,13 @@ attested_features:
   F-5cac007a: ok
   F-5d3ed2: ok
   F-5f6b45: ok
+  F-60b842: ok
   F-63b989e5: ok
   F-64a5c159: ok
   F-65814a: ok
   F-67d2e9: ok
   F-67e33f: ok
+  F-6aebb9: ok
   F-6ba22c5c: ok
   F-6d943d: ok
   F-6e49fd24: ok
@@ -638,6 +648,7 @@ attested_features:
   F-e803c149: ok
   F-e8912be3: ok
   F-e940fffe: ok
+  F-ea1f13: ok
   F-eb732f: ok
   F-ede6fa75: ok
   F-ee47fc2b: ok
