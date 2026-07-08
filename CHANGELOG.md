@@ -5,7 +5,29 @@ All notable changes to Cladding are documented here.
 Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.2] — Human-first diagnostics + init/scan correctness (2026-07-07)
+
+The "speak the user's language" UX pass, plus three init/scan fixes found while reproducing an onboarding bug.
+
+> **Heads-up:** An A/B against 0.8.1 found all three fixes correct but with no measured user-facing gain under a capable AI host — they ship as correctness, not user wins. The real beneficiary is the bare-terminal first-timer.
+
+### Added
+
+- **Plain-language findings** — the four human surfaces lead with what drifted and what to do; machine detail (id · path) trails. JSON/SARIF/MCP/events byte-unchanged.
+- **Speak the user's language** — cladding ships one English source and the host agent renders the user's language; no locale detected or stored. `clad init`/`setup`/`clarify` output moved to it too.
+
+### Changed
+
+- **Spec-first window stopped shouting** — an unbuilt module on a planned/in-progress feature is an info note, not a block; done/archived keep the hard error.
+- **Cards speak human** — session/prompt cards and block reasons drop internal ids and tool names; impact cards say "N features depend on this."
+
+### Fixed
+
+- **First-run no longer bricks the spec** — an empty `layers:` (null, schema-invalid) now renders `layers: []`, so a small project's first init stays governable.
+- **Scanned globs match real files** — layer globs gained the source root (`src/api/**`) and flat projects stop leaking the project directory name.
+- **Docs match detector behavior** — the feature-cycle doc and detector catalog now record the status-aware untested-AC / missing-implementation severity.
+
+Net: a correctness release, not a capability leap.
 
 ## [0.8.1] — Adoption Proof + Friction Diet (2026-07-06)
 
