@@ -22,7 +22,9 @@ import {recordEvent} from '../events/log.js';
 import {join} from 'node:path';
 
 import {parseSpec} from '../spec/parse.js';
-import {doneRefusalLead} from '../ui/softShell.js';
+import {doneRefusalLead, doneSelfCertRefusalLead} from '../ui/softShell.js';
+import {computeIndependence, type IndependenceLabel} from '../hitl/independence.js';
+import type {Evidence} from '../hitl/identity.js';
 import type {GitOperation} from '../core/git-ops.js';
 
 /** Gate runner injected so tests can drive `runDone` without spawning tsc/vitest. */
@@ -49,6 +51,22 @@ export interface DoneDeps {
    * any shard, index, or attestation write.
    */
   readonly gitOpInProgress?: (cwd: string) => GitOperation | null;
+  /**
+   * OPTIONAL independence seam (F-c566f590). When present, runDone computes the
+   * feature's evidence-based independence label from `evidence` and threads it
+   * into the DoneResult + the done_attempted event. Under `policy: 'require'` it
+   * additionally REFUSES to keep a self-certified feature done (revert + re-sync,
+   * exactly like a red gate). Injected + optional so runDone stays hermetic — no
+   * loadSpec / readEvidence inside; an omitted dep behaves exactly as before
+   * (label absent). Wired to project.independence_policy + readEvidence in
+   * runDoneCommand.
+   */
+  readonly independence?: {
+    /** 'label' = annotate only (default); 'require' = block a self-certified done. */
+    readonly policy: 'label' | 'require';
+    /** The evidence ledger slice runDone weighs the feature against. */
+    readonly evidence: readonly Evidence[];
+  };
 }
 
 /** Outcome of a `clad done` attempt — `code` is the process exit code. */
@@ -58,6 +76,13 @@ export interface DoneResult {
   readonly featureId: string;
   readonly prevStatus?: string;
   readonly shardPath?: string;
+  /**
+   * The feature's evidence-based independence label (F-c566f590). Present only
+   * once the gate has run with an injected `independence` dep; absent on the
+   * early refusals (git-op / missing shard / design impact) and when no dep was
+   * supplied.
+   */
+  readonly independence?: IndependenceLabel;
   readonly reason: string;
 }
 
@@ -66,6 +91,7 @@ interface ShardHit {
   readonly status: string;
   /** The feature's declared `modules[]` — forwarded to scope the gate. */
   readonly modules: readonly string[];
+  readonly designImpactStatus?: string;
 }
 
 /**
@@ -85,12 +111,17 @@ export function findShardFile(cwd: string, featureId: string): ShardHit | null {
     } catch {
       continue;
     }
-    const rec = doc as {id?: unknown; status?: unknown; modules?: unknown};
+    const rec = doc as {id?: unknown; status?: unknown; modules?: unknown; design_impact?: {status?: unknown}};
     if (rec && rec.id === featureId) {
       const modules = Array.isArray(rec.modules)
         ? rec.modules.filter((m): m is string => typeof m === 'string')
         : [];
-      return {path, status: typeof rec.status === 'string' ? rec.status : '', modules};
+      return {
+        path,
+        status: typeof rec.status === 'string' ? rec.status : '',
+        modules,
+        designImpactStatus: typeof rec.design_impact?.status === 'string' ? rec.design_impact.status : undefined,
+      };
     }
   }
   return null;
@@ -129,7 +160,7 @@ export function runDone(cwd: string, featureId: string, deps: DoneDeps): DoneRes
       featureId,
       reason:
         `${op} in progress — refusing done until the tree settles.` +
-        ` Complete or abort the ${op}, then re-run \`clad done\`. No shard, attestation, or index was written.`,
+        ` Complete or abort the ${op}, then re-run \`clad done\`. Nothing in the spec or its records was changed.`,
     };
   }
   const hit = findShardFile(cwd, featureId);
@@ -139,8 +170,18 @@ export function runDone(cwd: string, featureId: string, deps: DoneDeps): DoneRes
       code: 1,
       featureId,
       reason:
-        `no feature shard under spec/features/ declares id '${featureId}'` +
+        `no feature in the spec declares id '${featureId}'` +
         ' (inline features: edit spec.yaml then run `clad check --tier=pre-push --strict` manually)',
+    };
+  }
+  if (hit.designImpactStatus === 'review_required') {
+    return {
+      ok: false,
+      code: 1,
+      featureId,
+      reason:
+        'structural design impact still needs review — apply the listed architecture, capability, or project-context changes, ' +
+        'then resolve the design impact before marking this feature done.',
     };
   }
   const original = readFileSync(hit.path, 'utf8');
@@ -159,33 +200,74 @@ export function runDone(cwd: string, featureId: string, deps: DoneDeps): DoneRes
     strict: true,
     focusModules: hit.modules,
   });
-  // F-b84c38 — every done transition (kept or reverted) is forensic data.
-  recordEvent(cwd, 'done_attempted', {feature: featureId, worst, anyFailed: anyFailed ?? worst > 0, kept: worst === 0});
-  if (worst === 0) {
+  // F-c566f590 — the evidence-based independence label. Computed once from the
+  // injected evidence slice (an omitted dep ⇒ undefined ⇒ pre-independence
+  // behavior). It does NOT depend on the gate: a feature can be GREEN yet still
+  // be self-certified (no human/blind evidence backs it).
+  const independence = deps.independence
+    ? computeIndependence(featureId, deps.independence.evidence).label
+    : undefined;
+  // Under the opt-in `require` policy a GREEN gate is necessary but NOT
+  // sufficient: a self-certified feature must earn independent or human review
+  // before it keeps done. This refusal reverts exactly like a red gate — but a
+  // genuinely red gate takes precedence (its message stays unchanged).
+  const selfCertBlocked =
+    worst === 0 && deps.independence?.policy === 'require' && independence === 'self-certified';
+  const kept = worst === 0 && !selfCertBlocked;
+  // F-b84c38 — every done transition (kept or reverted) is forensic data; the
+  // independence label rides along on both paths (F-c566f590).
+  recordEvent(cwd, 'done_attempted', {
+    feature: featureId,
+    worst,
+    anyFailed: anyFailed ?? worst > 0,
+    kept,
+    ...(independence ? {independence} : {}),
+  });
+  if (kept) {
     return {
       ok: true,
       code: 0,
       featureId,
       prevStatus: hit.status,
       shardPath: hit.path,
+      independence,
       reason: `strict gate GREEN — status: ${hit.status || 'unset'} → done`,
     };
   }
-  // Red gate: the feature has not earned done. Revert to exactly what was there.
+  // Not kept — revert to exactly what was there and re-sync the index
+  // symmetrically, else it would keep the pre-gate `done` row against a reverted
+  // shard (inverse staleness). (F-37b4a8) BOTH the red-gate and the
+  // require-policy refusal share this revert.
   writeFileSync(hit.path, original);
-  // Shard restored → re-sync the index symmetrically, else it would keep the
-  // pre-gate `done` row against a reverted shard (inverse staleness). (F-37b4a8)
   deps.onIndex?.(cwd);
   // Plain-first (F-dd8dc994): a plain English lead first; the machine sentence
   // (kept byte-for-byte) follows as a language-neutral tail so contract pins
-  // ('not GREEN', 'status left at') survive. The host agent renders the user's
-  // own language (F-9af291fa).
+  // survive. The host agent renders the user's own language (F-9af291fa).
+  if (selfCertBlocked) {
+    // GREEN gate, but the project requires the independent review this feature
+    // lacks (AC-ad5ea48b). Same revert as a red gate; a different plain lead.
+    return {
+      ok: false,
+      code: 1,
+      featureId,
+      prevStatus: hit.status,
+      shardPath: hit.path,
+      independence,
+      reason:
+        `${doneSelfCertRefusalLead()}. ` +
+        `no independent or human review backs this feature — status left at '${hit.status || 'unset'}'.` +
+        ' Add a human sign-off or an independent (blind) review, then re-run `clad done`.',
+    };
+  }
+  // Red gate: the feature has not earned done. Contract pins ('not GREEN',
+  // 'status left at') survive in the machine tail.
   return {
     ok: false,
     code: 1,
     featureId,
     prevStatus: hit.status,
     shardPath: hit.path,
+    independence,
     reason:
       `${doneRefusalLead()}. ` +
       `strict gate not GREEN — status left at '${hit.status || 'unset'}'.` +

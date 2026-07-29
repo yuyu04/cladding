@@ -32,9 +32,10 @@ import {
   type OnboardingObserved,
   type OnboardingResult,
 } from './scan/intent-onboarding.js';
-import {saveState, type OnboardingState} from './scan/onboarding-state.js';
+import type {ScanLlmDispatcher} from './scan/llm.js';
+import {captureArtifactDigests, loadState, saveState, type OnboardingState} from './scan/onboarding-state.js';
 import {detectToolchain} from '../stages/toolchain/detect.js';
-import {writeAgentsMd, writeClaudeMdSection} from '../init/host-instructions.js';
+import {writeSpecDrivenAgentsMd} from '../init/agents-md.js';
 import {getCurrentCladdingVersion, getLastSetupVersion} from '../init/host-setup.js';
 import {installGitHook} from '../init/git-hook.js';
 import {loadIntentFromPathIfApplicable} from './intent-from-path.js';
@@ -77,6 +78,8 @@ export interface InitOptions {
   readonly withHook?: boolean;
   /** Scaffold the authoritative CI gate workflow (F-16746b). */
   readonly withCi?: boolean;
+  /** Host-produced onboarding response; used by the MCP prepare/apply flow. */
+  readonly hostDispatcher?: ScanLlmDispatcher;
 }
 
 export interface InitResult {
@@ -93,6 +96,8 @@ export interface InitResult {
   readonly clarifyingQuestions?: readonly string[];
   /** Mode the onboarding pass classified the project as (intent path only). */
   readonly onboardingMode?: OnboardingResult['mode'];
+  /** Reports whether intent onboarding used the host LLM or a fallback. */
+  readonly onboardingSource?: OnboardingResult['source'];
 }
 
 // v0.3.30 — Scenarios in cladding capture *user journeys* (business
@@ -107,11 +112,9 @@ const SCENARIOS_README = [
   'Scenarios in cladding capture **user journeys** — the business flows your',
   'system enables, not the architecture layers your code is organised into.',
   '',
-  'You do not author scenario YAML by hand. They are auto-registered when you',
-  'request a feature through natural-language conversation with your AI host —',
-  'the host invokes the `clad` CLI (or the `clad_create_feature` MCP tool when',
-  'cladding is wired as an MCP server). The scenario your request belongs to is',
-  'inferred together with the feature itself.',
+  'You do not author scenario YAML by hand. They are registered for you when you',
+  'ask your AI assistant to add a feature in ordinary conversation. The scenario',
+  'your request belongs to is inferred together with the feature itself.',
   '',
   'This directory is intentionally empty at scan time. The first scenario lands',
   'when you ship the first feature.',
@@ -129,7 +132,7 @@ const SCENARIOS_README = [
   '',
   '- `docs/conventions.md` — observed conventions (auto-generated)',
   '- `spec/architecture.yaml` — observed layers + forbidden_imports candidates',
-  '- `spec.yaml` — feature registry (grown by clad_create_feature)',
+  '- `spec.yaml` — feature registry (grown as you add features in conversation)',
   '',
 ].join('\n');
 
@@ -206,6 +209,7 @@ function specSeed(
   const projectLines = [
     `  name: ${projectName}`,
     `  language: ${language}`,
+    '  onboarding_seeded: true',
   ];
   if (metadata?.description) {
     projectLines.push(`  description: ${quoted(metadata.description)}`);
@@ -314,10 +318,10 @@ export function scaffoldCiWorkflow(cwd: string): 'created' | 'exists' {
  * Returns null when the wire state matches the running binary (no notice). */
 export function hostWireNotice(lastSetup: string | null, pkgVersion: string | null): string | null {
   if (lastSetup == null) {
-    return 'host channels not wired yet — run `clad setup` to enable `/cladding init` from Claude Code / Codex / Gemini';
+    return 'host channels not wired yet — run `clad setup`, restart your AI tool, then ask it to apply Cladding to this project';
   }
   if (pkgVersion && lastSetup !== pkgVersion) {
-    return `host wire was set up at v${lastSetup} (current binary v${pkgVersion}) — symlinks usually auto-follow, but run \`clad setup\` to be sure`;
+    return `this project's host wiring was set up at v${lastSetup} (current binary v${pkgVersion}) — run \`clad setup\` in this project to refresh its local runtime`;
   }
   return null;
 }
@@ -420,7 +424,7 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
   // dispatcher both fall back to a deterministic variant that quotes
   // the intent verbatim.
   let onboarding: OnboardingResult | null = null;
-  const dispatcher = selectDispatcher({noLlm: opts.noLlm});
+  const dispatcher = opts.hostDispatcher ?? selectDispatcher({noLlm: opts.noLlm});
   if (intent && intent.length > 0) {
     const observed: OnboardingObserved = {
       cwdBasename: basename(resolve(cwd)),
@@ -550,7 +554,20 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     // directly instead of re-parsing docs/project-context.md. LLM
     // refinement (when a dispatcher is available) adds `summary` +
     // `surface` per entry; deterministic mode ships id + title only.
-    writeArtifact(cwd, 'spec/capabilities.yaml', interp.capabilitiesYaml, created, proposals);
+    //
+    // v0.9.1 — an existing-project adoption still carries the host/LLM's
+    // approved, domain-aware capabilities via the onboarding pass. The scan
+    // interpreter can't see them: its total-fallback fires on the absent
+    // CONVENTIONS_MD sentinel (a host draft never emits it) and re-derives
+    // capabilities from README headings — or `[]` when there are none —
+    // silently discarding the draft's schema-validated 3–8 entries. Prefer
+    // the onboarding capabilities when the dispatcher genuinely fired
+    // (`source === 'llm'`), mirroring the greenfield branch below; the
+    // scanner still owns conventions.md + architecture.yaml, which are
+    // code-grounded and correct for a real codebase.
+    const capabilitiesYaml =
+      onboarding?.source === 'llm' ? onboarding.capabilitiesYaml : interp.capabilitiesYaml;
+    writeArtifact(cwd, 'spec/capabilities.yaml', capabilitiesYaml, created, proposals);
 
     // v0.3.30 — scenarios are not auto-extracted from observed code.
     // A user journey is *intent*, not architecture, so cladding leaves
@@ -661,37 +678,30 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     }
   }
 
-  // F-90d054 — project-local host AI instruction surfaces.
-  // AGENTS.md is the cross-tool entry point (Codex · Cursor · Continue ·
-  // Copilot · Aider). CLAUDE.md is Claude Code's project memory — appended
-  // idempotently so existing user content is preserved. v0.4.0 — when the
-  // existing file carries v0.3.x markers (e.g. `_meta.enrichment_status`,
-  // lone `clad_create_feature MCP tool`), it is refreshed in place so AI
-  // sessions don't see stale guidance.
-  const agentsResult = writeAgentsMd(cwd, {force});
-  if (agentsResult === 'created' || agentsResult === 'overwritten') {
+  // F-90d054 — AGENTS.md is the single cross-host instruction surface.
+  // Existing CLAUDE.md files belong to the user and are never created or
+  // changed by onboarding; Claude Code reads AGENTS.md as well.
+  // F-a4085adf (#199) — the adopter's AGENTS.md is now spec-driven: its managed
+  // block is rendered from spec.yaml (test framework, branch, forbidden/preferred
+  // patterns, preferred persona) + the cross-host persona→capability map, instead
+  // of a static template. Marker-upsert keeps re-emission prose-preserving and
+  // byte-stable, and a markerless (hand-authored) AGENTS.md is left untouched even
+  // under --force, protecting a user's own file.
+  const agentsResult = writeSpecDrivenAgentsMd(cwd);
+  if (agentsResult === 'created') {
     created.push('AGENTS.md');
-  } else if (agentsResult === 'refreshed-stale') {
-    created.push('AGENTS.md (refreshed — v0.3.x guidance replaced)');
+  } else if (agentsResult === 'updated') {
+    created.push('AGENTS.md (managed block refreshed from spec)');
+  } else if (agentsResult === 'skipped-unmanaged') {
+    skipped.push('AGENTS.md (hand-authored — no clad markers, left untouched)');
   } else {
-    skipped.push('AGENTS.md (exists; pass --force to overwrite)');
+    skipped.push('AGENTS.md (managed block already current)');
   }
-  const claudeResult = writeClaudeMdSection(cwd, {force});
-  if (claudeResult === 'created') {
-    created.push('CLAUDE.md');
-  } else if (claudeResult === 'appended') {
-    created.push('CLAUDE.md (## cladding section appended)');
-  } else if (claudeResult === 'refreshed-stale') {
-    created.push('CLAUDE.md (## cladding section refreshed — v0.3.x guidance replaced)');
-  } else {
-    skipped.push('CLAUDE.md (## cladding section already present)');
-  }
-
   // F-80d19d — friendly warning when host channels were never wired or are
   // out of sync with the current cladding binary. `clad setup` is the explicit
   // command for wiring; this is informational only and does not block init.
   const pkgVersion = getCurrentCladdingVersion();
-  const wireNotice = hostWireNotice(getLastSetupVersion(), pkgVersion);
+  const wireNotice = hostWireNotice(getLastSetupVersion(cwd), pkgVersion);
   if (wireNotice) skipped.push(wireNotice);
 
   // Phase 2 (opt-in) — ambient enforcement via a git pre-commit hook. Off
@@ -735,6 +745,14 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     }
   }
 
+  // The Q&A loop may overwrite only byte-identical Cladding-generated design.
+  // Capture after every initial artifact has landed so later user edits are
+  // diverted for review rather than silently replaced.
+  if (onboarding) {
+    const state = loadState(cwd);
+    if (state) saveState(cwd, {...state, artifactDigests: captureArtifactDigests(cwd)});
+  }
+
   return {
     created,
     skipped,
@@ -742,6 +760,7 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     proposals: proposals.length ? proposals : undefined,
     clarifyingQuestions: onboarding?.clarifyingQuestions.length ? [...onboarding.clarifyingQuestions] : undefined,
     onboardingMode: onboarding?.mode,
+    onboardingSource: onboarding?.source,
   };
 }
 

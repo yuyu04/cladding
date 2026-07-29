@@ -5,6 +5,146 @@ All notable changes to Cladding are documented here.
 Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — Completions record whether anything checked them independently (2026-07-26)
+
+**In one line:** every finished feature is now marked `independent` or `self-certified` from the evidence it actually recorded, and cladding stops prescribing how you arrange your agents.
+
+### Added
+
+- **An independence mark on every completion.** `clad done` and `clad verdict` label each finished feature `independent` or `self-certified`, computed from the recorded evidence — human-authored or blind-authored evidence earns `independent`; tool/LLM evidence alone is `self-certified`. It is a visible label, not an accusation, and it never records which agents did the work or how many.
+- **An optional stricter policy.** `spec.yaml::project.independence_policy` accepts `label` (default — annotate only) or `require`, which refuses to keep a `self-certified` feature done and reverts it exactly like a red gate.
+- **A locale diagram for the Multi-Agent section** in all four languages, drawing the label decision — the host band, the single question, the two outcomes, and the refusal only `require` produces.
+
+### Changed
+
+- **cladding no longer prescribes agent topology.** The coordinator prompt dropped its routing table, numbered invocation principles, named agent chain and host-mode work-in-progress table, and now declares only the outcome conditions a feature must satisfy. Agent count, models, ordering and parallelism are the host's decision.
+- **The specialist prompts are selectable role briefs, not a mandated cast.** Any host agent may take up any of them, and an agent that never touches a cladding surface needs none. The gates judge a result the same way whoever produced it.
+- **The README's Multi-Agent section leads with the stake** — one AI writing both the code and its tests produces a green run that proves nothing — before naming any label.
+- **"spec entry", not "shard", in AI-facing surfaces** (carried from the terminology fix that had not yet reached `develop`).
+
+### Fixed
+
+- **A false claim about human sign-off.** The README stated that a person approving a review earns `independent`. No code path records human-authored evidence, so the claim was removed rather than softened; the real limitation is now disclosed in the section itself.
+- **Stale counts on the front page and status table** — feature and test-file totals were months out of date.
+- **A broken layout in the HTML READMEs**, where the before/after pair rendered as one narrow card in a three-column grid with two-thirds of the row empty.
+
+### Verified against a control
+
+The choreography removal was tested as a single-variable ablation (`docs/ab-evaluation/case-role-contract-ablation.md`): six agents, three per arm, differing only in the coordinator prompt, scored blind against each arm's final code. The planted defect was caught 3/3 in **both** arms — no regression. Per the decision rule fixed before the run, **no benefit is claimed**: effort favoured the new prompt but the ranges overlapped at that sample size, so the change is recorded as safe and neutral.
+
+### Known limitations (recorded, not fixed)
+
+- `independent` is reachable only through the AI-tool oracle path; a terminal-only project cannot earn it, and under `independence_policy: require` has no first-party way out.
+- Human-authored evidence has no first-party writer anywhere, so a person's own sign-off cannot currently be recorded.
+
+Both are written up in `docs/refinement-backlog.md` with a reopen trigger.
+
+## [0.9.1] — Adoption keeps approved capabilities + polyglot gate fidelity (2026-07-21)
+
+**In one line:** adopting an existing project now keeps the capabilities you approved, and the gate reads and reports non-JavaScript projects more faithfully while nudging when the feature cycle isn't being driven.
+
+### Fixed
+
+- **Existing-project adoption keeps the capabilities you approved.** When you adopt a project that already has code, the capabilities produced and confirmed during onboarding are now written to `spec/capabilities.yaml`. Previously the observed-scan path re-derived them from README headings — or left `capabilities: []` when the repo had none — silently discarding the approved set. The greenfield path already honored them; the scan path now matches it. Conventions and architecture stay scanner-sourced.
+
+### Gate and toolchain fidelity
+
+- **The check-only formatters list every dirty file, not just the first.** `dart format` (and peers like `dotnet format`) print one changed-file line each; those aren't ESLint-shaped, so the lint stage used to collapse them to a single pathless finding — fix one, re-run, the next appears. Each dirty file now surfaces as its own finding with its path, plus a one-line `fix: run \`dart format .\`` hint.
+- **Python projects run the test suite once per gate, not twice.** On pytest projects the unit stage and the coverage stage each spawned the whole suite (`pytest`, then `coverage run -m pytest`) — roughly doubling gate time. The unit stage now runs the coverage-instrumented suite once and shares it with the coverage stage, the same dedup vitest already had. The zero-executed-tests guard still applies on the shared pytest run, so the dedup can't turn a vacuous run green.
+- **The header-comment convention check understands more languages.** It now recognises `#` comments and Python docstrings (`"""`, `'''`), not only `//` / `/*`.
+
+### Feature-cycle signals
+
+- **A non-blocking nudge when sustained source edits are bound to no feature.** When edits to files that no feature tracks accumulate past a small threshold, the post-edit card surfaces one advisory to start a feature — so the spec-first cycle gets triggered instead of silently skipped. Debounced and once-per-window; it never blocks.
+- **`clad check` flags unenforced projects.** When a project has features not yet done but neither a git hook nor CI wires the gate, `clad check` prints one advisory that the checks run only when asked — with how to wire enforcement. Informational only; it never changes the exit status.
+- **A cold-start signal when a project has code but no feature specs.** `clad check` and session start now say the spec-first cycle hasn't begun, instead of the project looking clean. Advisory only.
+- **Onboarding hands off to authoring the first feature spec, not straight to code**, and writing code ahead of its spec is caught both at that handoff and at the resting state.
+
+### Plain-language output
+
+- **Soft-shell jargon leaks closed and enforcement tightened.** More user-facing output stays in plain words rather than internal cladding terms; the plain-language guard now also checks the finding lead line and forbids raw internal identifiers.
+
+## [0.9.0] — Project-scoped natural-language onboarding (2026-07-16)
+
+**In one line:** apply Cladding from ordinary conversation without a shell command, while project-local discovery, a read-only preview, an exact approval phrase, and atomic recovery keep onboarding bounded.
+
+### MCP host (clad serve)
+
+- **Start from an idea, a complete UTF-8 planning document, or an existing codebase.** The host reuses the CLI onboarding engine, keeps the full document and observed source evidence, and asks at most three material follow-up questions only when decisions remain open.
+- **Preview before any authored file changes.** Initialization requires the exact one-time phrase shown after validation and staging; malformed, stale, replayed, or partially applied drafts leave the project at its pre-apply content.
+- **Resume across host restarts.** Process-per-turn hosts retain the exact staged draft in ignored project runtime state instead of reconstructing intent from an approval code.
+- **Keep activation inside the selected project.** Setup no longer exposes Cladding tools to unrelated projects, removes only provably owned legacy global wiring, and uses the same project runtime for MCP and later shell validation.
+- **Expose only the initialization bootstrap before `spec.yaml` exists.** The ordinary development tool surface becomes available after successful initialization.
+
+### Spec governance (4-tier SSoT)
+
+- **Onboarding now seeds capabilities and user journeys into the governed design.** Early generated links remain informational until the shared maturity threshold, while invalid references and under-bound flows still block.
+- **Completed onboarding hands off to ordinary natural-language development** and distinguishes on-demand checks from opt-in hook or CI enforcement.
+
+### Gate and toolchain fidelity
+
+- **JavaScript projects follow their declared tools.** Custom scripts win; Jest, Vitest, ESLint, Biome, and Oxlint are selected from project evidence, and architecture checks include TSX, JSX, JavaScript, and TypeScript.
+- **A missing runnable deliverable stays honest.** Safe declared entries run, broken entries block, and an early onboarding seed is not forced to invent an unsafe smoke command.
+- **Verification evidence remains non-vacuous.** Done features must execute a passing declared test, spec-conformance oracles preserve full-suite evidence, and unavailable tools remain skips rather than false passes.
+
+### Hardened by the packed-tarball E2E campaign (2026-07-16)
+
+A live campaign installed the packed 0.9.0 tarball in isolation and drove real init scenarios through all five host CLIs (report: `docs/dogfood/e2e-0.9.0-packed-2026-07-16.md`). The consent boundary held on every host that ran; these defects were found and fixed:
+
+- **Setup wires only detected hosts by default.** Previously every project received all five hosts' config files regardless of what was installed; `clad setup --host all` remains the explicit override.
+- **Antigravity actually connects now.** agy reads MCP config machine-wide only (a negative control proved the project file is never loaded), so setup also writes an ownership-guarded `~/.gemini/config/plugins/cladding/` wire — the one stated exception to project-local activation; sessions still resolve the project from their working directory.
+- **`clad update` outside a cladding project writes nothing.** It used to scaffold host wiring into any directory and could reach an account-wide legacy plugin uninstall.
+- **Abandoned onboarding preparations no longer accumulate.** Expired consent-cache envelopes are swept on staging (hundreds had piled up in the shared temp dir), and a tampered staged draft is now re-validated and rejected cleanly instead of surfacing a raw crash.
+- **Legacy cleanup preserves your global config formatting.** The codex `config.toml` entry is now spliced out textually (comments and ordering survive, parse-verified), and cursor cleanup no longer leaves an orphan empty `mcpServers`.
+- **`clad doctor --hosts` probes match the project-local model** (project-MCP approval for the consented Claude probe, project-directory Antigravity probe, Codex approvals bypass, and a realistic gate timeout).
+
+### Also changed
+
+- The deterministic collector found nine onboarding commit subjects that do not name a spec feature. Their user-visible behavior is covered by the spec-backed notes above, but their commit-to-spec linkage remains absent.
+
+### 한국어 요약
+
+**한 줄 요약:** 이제 셸 명령 없이 자연어로 Cladding을 적용할 수 있으며, 프로젝트 로컬 연결·읽기 전용 미리보기·정확한 승인 문구·원자적 복구가 온보딩 변경 범위를 지킵니다.
+
+- 아이디어·전체 UTF-8 기획 문서·기존 코드 중 어디서든 시작하고, 결정이 남은 경우에만 최대 3개의 핵심 질문을 받습니다.
+- 초기화 전에는 준비용 MCP 도구 3개만 노출되며, 정확한 일회용 승인 문구로 적용한 뒤 전체 개발 도구가 열립니다.
+- 실제 5개 호스트 CLI에 패키징된 tarball을 설치해 검증하는 E2E 캠페인을 거쳤습니다 — 설치된 호스트만 배선, Antigravity 연결 수리, 임시 파일 잔존 정리 등 캠페인이 찾은 결함을 모두 수정했습니다.
+- 호스트가 재시작돼도 검토한 초안을 그대로 적용하고, 실패·오래된 요청·재사용 요청은 프로젝트를 부분 변경 상태로 남기지 않습니다.
+
+## [0.8.3] — Agent loops that stop honestly, a guard against unverified "done", and a faster check (2026-07-12)
+
+This release helps you build AI agent loops that stop when the work is genuinely finished, closes a hole where a feature could look done without its tests ever running, makes the pre-push check faster, and ships native Japanese and Chinese documentation.
+
+If you build your own agent loop, cladding now gives that loop an honest "are we actually done?" answer and a clear "here's what's still broken" list. These loop features are **for loop engineering** — they harden when the loop may stop and what it fixes next, not the AI's code quality (cladding's own A/B testing is the receipt: this kind of governance is separate from code correctness).
+
+> **Heads-up — two things to know when you upgrade:**
+> - The strict check now flags any feature marked **done** whose declared tests don't actually run. A feature that looked green but was never truly verified will surface after upgrade.
+> - Setting up a project now also writes an `AGENTS.md` from your spec, so AGENTS.md-aware AI tools pick up your project's context on their own. Your existing files aren't touched.
+
+### Added
+
+- **Tell your agent loop when it's genuinely finished** — a read-only check answers "is this actually done?" using the very same gate as a real completion; it only reports, it never changes anything.
+- **The loop gives up gracefully instead of spinning** — when repeated attempts stop making progress, it escalates rather than looping forever.
+- **The loop remembers what already failed to build** — past build failures are fed back in, so the AI stops resubmitting the same broken fix.
+- **Errors come back as exact file-and-line pointers**, so the loop fixes them in one pass instead of re-running just to find where the problem was.
+- **New projects get an `AGENTS.md` generated from their spec** (closes #199), so any AGENTS.md-aware AI tool inherits the project's intent; cladding's own copy is protected from being overwritten.
+- **More toolchains detected** — Swift, Flutter, Dart, plus TypeScript-with-Jest and mixed-file-extension projects.
+- **Native Japanese and Chinese READMEs** — written natively, not machine-translated, with translated diagrams. The docs switch between English · 한국어 · 日本語 · 中文.
+
+### Changed
+
+- **The pre-push check runs your tests once, not twice** (closes #215) — about 28% faster, with the "did the tests really run?" guard fully intact.
+- **Tidier evidence bookkeeping** — some spec entries record their supporting material more accurately, and the self-check emits a standard test report.
+- **The tool self-checks its own advertised detector count**, so the docs can't quietly drift from the code.
+
+### Fixed
+
+- **`clad check` no longer crashes when its output is piped into something that stops reading early** — like `head` (closes #221).
+
+### Security
+
+- **Closed a "looks green but was never verified" hole** — a feature marked done whose tests don't actually run is now caught. cladding treats a check that can be tricked into a false pass as a trust issue, and this closes one way it could be tricked.
+
 ## [0.8.2] — Human-first diagnostics + init/scan correctness (2026-07-07)
 
 The "speak the user's language" UX pass, plus three init/scan fixes found while reproducing an onboarding bug.

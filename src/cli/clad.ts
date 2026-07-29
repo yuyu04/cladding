@@ -20,10 +20,13 @@ import {runReportCommand} from './report.js';
 import {runDoctorCommand} from './doctor.js';
 import {runDoctorHosts} from './doctor-hosts.js';
 import {runDone} from './done.js';
+import {featureCycleAdvisory} from './enforcement-advisory.js';
 import {runHookCommand} from './hook.js';
+import {runVerdictCommand} from './verdict.js';
 import {runUpdate} from './update.js';
 import {runInit} from './init.js';
-import {runClarifyCommand} from './clarify.js';
+import {refineOnboarding, resolveOnboardingReview, runClarifyCommand} from './clarify.js';
+import {prepareHostClarify, prepareHostInit, renderHostDraft} from './host-onboarding.js';
 import {getCurrentCladdingVersion, runHostSetup} from '../init/host-setup.js';
 import {recordEvent} from '../events/log.js';
 import {buildContextSlice} from '../optimizer/context-slice.js';
@@ -38,6 +41,7 @@ import {strictSkipViolations} from '../stages/skip-policy.js';
 import {runArch} from '../stages/arch.js';
 import {runAudit} from '../stages/audit.js';
 import {clearDetectorResultCache, primeDetectorResultCache} from '../stages/detector-result-cache.js';
+import {clearTestRunCache, primeTestRunCache} from '../stages/test-run-cache.js';
 import {runCommit} from '../stages/commit.js';
 import {runCov} from '../stages/cov.js';
 import {runDrift} from '../stages/drift.js';
@@ -59,11 +63,13 @@ import {gitOperationInProgress, gitOperationInProgressName} from '../core/git-op
 import {maintainDeliverable} from '../spec/deliverable-detect.js';
 import {computeInventory, writeInventoryToSpecYaml, writeFeatureIndex} from '../spec/inventory.js';
 import {writeDocLinksYaml} from '../spec/doc-references.js';
+import {writeSpecDrivenAgentsMd} from '../init/agents-md.js';
 import {repairTestRefs} from '../spec/test-ref-repair.js';
 import {writeAttestation} from '../spec/attestation.js';
 import {buildBlindPayload, renderBlindBrief} from '../oracle/payload.js';
 import {requiredOracleWorklist} from '../oracle/policy.js';
 import {loadSpec} from '../spec/load.js';
+import {readEvidence} from '../hitl/audit.js';
 import {pulse, type PulseKind} from '../ui/pulse.js';
 import {buildPanelModel, renderPanel} from '../ui/panel.js';
 import {featureLabel, gateLabel, haltMessage, plainLead} from '../ui/softShell.js';
@@ -77,7 +83,17 @@ export async function runServeCommand(opts: {cwd?: string}): Promise<void> {
     import('@modelcontextprotocol/sdk/server/stdio.js'),
     import('../adapters/host/sampling-context.js'),
   ]);
-  const server = buildServer({cwd: opts.cwd});
+  const server = buildServer({
+    cwd: opts.cwd,
+    onboarding: {
+      renderDraft: (draft) => renderHostDraft(draft as Parameters<typeof renderHostDraft>[0]),
+      prepareInit: ({cwd, mode, intent}) => prepareHostInit(cwd, mode, intent),
+      initialize: runInit,
+      prepareClarify: (answer, {cwd}) => prepareHostClarify(cwd, answer),
+      clarify: refineOnboarding,
+      resolveReview: (targets, {cwd}) => resolveOnboardingReview(targets, {cwd}),
+    },
+  });
   // v0.2.26 (F-075): register the server in the sampling context so
   // the host adapters (`generic-mcp`, `claude-code`) automatically
   // route LLM dispatch through McpSamplingTransport instead of the
@@ -119,6 +135,7 @@ export async function runInitCommand(
     roots?: string;
     withHook?: boolean;
     withCi?: boolean;
+    json?: boolean;
   },
 ): Promise<void> {
   const intent = intentTokens && intentTokens.length > 0 ? intentTokens.join(' ').trim() : undefined;
@@ -132,6 +149,11 @@ export async function runInitCommand(
     withHook: opts.withHook,
     withCi: opts.withCi,
   });
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    process.exit(0);
+    return;
+  }
   for (const c of result.created) pulse('pass', `created ${c}`);
   for (const s of result.skipped) pulse('skip', s);
   for (const p of result.proposals ?? []) pulse('note', 'proposal', p);
@@ -253,6 +275,18 @@ export function runSyncCommand(opts: {proposeArchive?: boolean} = {}): void {
       writeInventoryToSpecYaml('.', inventory);
       writeFeatureIndex('.'); // F-37b4a8 — 1-file feature lookup at scale
       writeDocLinksYaml('.'); // F-doc-graph — doc→spec/doc link index (Tier C)
+      // F-a4085adf (#199) — refresh the spec-driven AGENTS.md managed block so
+      // cross-host agents (Codex/Gemini/Cursor/…) read the same spec-sourced
+      // guidance Claude gets. Marker-upsert: regenerates only the delimited
+      // block, preserves user prose, byte-stable on unchanged spec, and leaves a
+      // markerless (hand-authored) AGENTS.md untouched — so cladding's own root
+      // /AGENTS.md is never rewritten.
+      const agentsMd = writeSpecDrivenAgentsMd('.');
+      if (agentsMd === 'created') {
+        pulse('note', 'agents.md', 'wrote a spec-driven AGENTS.md so non-Claude agents share the same guidance.');
+      } else if (agentsMd === 'updated') {
+        pulse('note', 'agents.md', 'refreshed the AGENTS.md managed block from the current spec.');
+      }
       // F-c037ae — heal annotation drift before it rejects correct features:
       // unique-basename repair of moved test_ref paths + derived: suggestions
       // (which never satisfy a mandate — see MISSING_TESTS/UNTESTED_AC).
@@ -268,7 +302,7 @@ export function runSyncCommand(opts: {proposeArchive?: boolean} = {}): void {
         pulse(
           'note',
           'deliverable',
-          `auto-detected entry '${autoDeliverable.path}' — the gate now smoke-tests it (stage_2.4). Opt out with is_safe_to_smoke: false.`,
+          `auto-detected entry '${autoDeliverable.path}' — the gate now smoke-tests it. Opt out with is_safe_to_smoke: false.`,
         );
       }
     }
@@ -356,16 +390,27 @@ export function runRollbackCommand(featureId: string, opts: {reason?: string} = 
   process.exit(0);
 }
 
-/** Handler for `clad setup`. Wires cladding into installed AI tool host channels. */
-export async function runSetupCommand(opts: {force?: boolean; quiet?: boolean}): Promise<void> {
-  const result = await runHostSetup({force: opts.force, quiet: opts.quiet});
+/** Handler for `clad setup`. Activates Cladding only for one project. */
+export async function runSetupCommand(opts: {force?: boolean; quiet?: boolean; project?: string; host?: string}): Promise<void> {
+  // No --host → detected hosts only (spec AC-001); --host all → every channel.
+  const hosts = !opts.host
+    ? undefined
+    : opts.host === 'all'
+      ? (['claude', 'codex', 'gemini', 'antigravity', 'cursor'] as const).slice()
+      : [opts.host as 'claude' | 'codex' | 'gemini' | 'antigravity' | 'cursor'];
+  const result = await runHostSetup({
+    force: opts.force,
+    quiet: opts.quiet,
+    projectRoot: opts.project,
+    hosts,
+  });
   process.exit(result.errors.length > 0 ? 1 : 0);
 }
 
 /**
  * Handler for `clad update`. The one-command "after you upgraded the engine"
- * step, run from INSIDE the project you want to reconcile: re-wire hosts +
- * reconcile the spec inventory + refresh the managed CLAUDE.md/AGENTS.md section
+ * step, run from INSIDE the project you want to reconcile: refresh its host
+ * wiring + reconcile the spec inventory + refresh the managed CLAUDE.md/AGENTS.md section
  * (all safe + idempotent — see cli/update.ts), THEN run the now-stricter
  * detectors in REPORT mode. The drift report never blocks and never edits the
  * user's spec — it only surfaces the bar the upgrade raised, so `clad update`
@@ -378,14 +423,14 @@ export async function runSetupCommand(opts: {force?: boolean; quiet?: boolean}):
 export async function runUpdateCommand(): Promise<void> {
   pulse('note', 'update', 'reconciling the current project after the engine upgrade');
   const r = await runUpdate('.', {
-    wireHosts: async () => (await runHostSetup({quiet: true})).errors.length,
+    wireHosts: async () => (await runHostSetup({quiet: true, projectRoot: '.'})).errors.length,
   });
-  pulse(r.wiringErrors > 0 ? 'fail' : 'pass', 'hosts', r.wiringErrors > 0 ? `${r.wiringErrors} wiring error(s)` : 're-wired');
   if (!r.isProject) {
-    pulse('skip', 'spec', 'no spec.yaml here — run `clad init` to put this project under cladding');
+    pulse('skip', 'update', 'no spec.yaml here — nothing re-wired. Run `clad update` inside a cladding project, or `clad init` to start one.');
     process.exit(r.code);
     return;
   }
+  pulse(r.wiringErrors > 0 ? 'fail' : 'pass', 'hosts', r.wiringErrors > 0 ? `${r.wiringErrors} wiring error(s)` : 're-wired');
   if (r.inventoryDeferred) {
     pulse('note', 'spec', `inventory + index writes deferred — git operation in progress; re-run \`clad update\` after it completes (${r.features} features seen).`);
   } else {
@@ -427,6 +472,25 @@ export const TIER_STAGES: Record<string, readonly string[]> = {
   all: ['stage_1.1', 'stage_1.2', 'stage_1.3', 'stage_1.4', 'stage_1.5', 'stage_1.6', 'stage_2.1', 'stage_2.2', 'stage_2.3', 'stage_2.4', 'stage_3.1', 'stage_3.2', 'stage_3.3', 'stage_4.1', 'stage_4.2'],
 };
 
+/** Per-stage record collected during a gate run. Exported so the verdict
+ *  reducer (src/verdict/verdict.ts) can read the disposition + findings of each
+ *  stage WITHOUT re-running or re-implementing the pipeline. `status` is the
+ *  honest disposition (see stages/disposition.ts), NOT just the exit code. */
+export interface StageOutcome {
+  /** Ironclad stage id, e.g. `stage_2.1`. */
+  readonly stage: string;
+  /** User-facing label (or the raw id under `internal`). */
+  readonly label: string;
+  /** Honest gate disposition (pass/skip/fail/pending_env/advisory/na/liveness). */
+  readonly status: GateStatus;
+  /** Underlying exit code (1 for a disposition-blocking stage; 2 = skip lane). */
+  readonly exitCode: number;
+  /** Captured stderr; populated on failure. */
+  readonly stderr?: string;
+  /** Structured drift findings (only the drift stage carries these). */
+  readonly findings?: readonly DriftFinding[];
+}
+
 /** Outcome of running a tier's stages — exported so `clad done` can gate on
  *  the identical code path `clad check` uses (not a weaker re-implementation). */
 export interface CheckOutcome {
@@ -434,6 +498,12 @@ export interface CheckOutcome {
   readonly worst: number;
   /** True when at least one stage RAN and failed (exitCode 1). */
   readonly anyFailed: boolean;
+  /**
+   * Per-stage records for this run. Present when the caller wants the full
+   * disposition breakdown (verdict reducer); existing callers (`clad check`,
+   * `clad done`) ignore it. Absent on the early unknown-tier bail-out.
+   */
+  readonly stages?: readonly StageOutcome[];
 }
 
 /**
@@ -442,16 +512,21 @@ export interface CheckOutcome {
  * (which gates the status flip on it), so the two verify against the SAME stage
  * pipeline.
  */
-export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier?: string; json?: boolean; focusModules?: readonly string[]}): CheckOutcome {
+export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier?: string; json?: boolean; silent?: boolean; focusModules?: readonly string[]}): CheckOutcome {
   const tier = opts.tier ?? 'all';
+  // `silent` (the verdict poll) suppresses ALL user-facing IO — no pulse, no
+  // --json stdout write, no attestation stamp — but still computes the honest
+  // worst/anyFailed/stages and records the gate_run telemetry. A poll observes;
+  // it never speaks or mutates.
+  const silent = opts.silent === true;
   const allowed = TIER_STAGES[tier];
   if (!allowed) {
-    if (opts.json) {
+    if (opts.json && !silent) {
       process.stdout.write(`${JSON.stringify({tier, error: `unknown tier '${tier}'`, worst: 2, anyFailed: true, stages: []}, null, 2)}\n`);
-    } else {
+    } else if (!silent) {
       pulse('fail', 'check', `unknown --tier '${tier}' (expected: pre-commit | pre-push | all)`);
     }
-    return {worst: 2, anyFailed: true};
+    return {worst: 2, anyFailed: true, stages: []};
   }
   // Focus-feature module scope (Gradle monorepos): forwarded to every command
   // stage and to the drift suite so the coverage detector reads per-module
@@ -464,7 +539,7 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
     ['stage_1.4', runCommit],
     ['stage_1.5', runArch],
     ['stage_1.6', runSecret],
-    ['stage_2.1', () => runUnit(base)],
+    ['stage_2.1', () => runUnit({...base, strict: opts.strict})],
     ['stage_2.2', () => runCov(base)],
     ['stage_2.3', runSpecConformance],
     ['stage_2.4', runDeliverableSmoke],
@@ -482,6 +557,9 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
   // blocking → fail glyph; na → skip; liveness → note (ran, not green-as-smoke).
   const pulseKindOf = (s: GateStatus): PulseKind =>
     s === 'pass' ? 'pass' : s === 'liveness' ? 'note' : s === 'na' ? 'skip' : isBlocking(s) ? 'fail' : 'skip';
+  // Mutable during the run (the EXEMPT half below rewrites the drift row); the
+  // element shape matches StageOutcome exactly, so `collected` returns cleanly
+  // as `readonly StageOutcome[]`.
   const collected: {stage: string; label: string; status: GateStatus; exitCode: number; stderr?: string; findings?: readonly DriftFinding[]}[] = [];
   // F-e53596dd — prime the run-scoped detector cache so the drift stage's
   // ARCHITECTURE_VIOLATION + HARDCODED_SECRET runs are reused by stage_1.5/1.6
@@ -489,6 +567,11 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
   // The stages here default cwd to '.', so prime the same root. Cleared in
   // finally — a session outliving the loop would serve stale findings.
   primeDetectorResultCache('.');
+  // F-49f6f2d2 (#215) — prime the run-scoped shared-test-run cache so the unit
+  // stage (2.1) spawns ONE coverage+dual-json vitest run that the coverage stage
+  // (2.2) folds, instead of running the suite twice. Same '.' root, same
+  // finally-clear discipline; clear also unlinks the shared temp json.
+  primeTestRunCache('.');
   try {
     for (const [name, run] of stages) {
       const r = run({}) as {
@@ -511,13 +594,14 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
         worst = Math.max(worst, worstContribution(r, status));
       }
       collected.push({stage: name, label, status, exitCode: r.exitCode, stderr: r.stderr, findings: r.findings});
-      if (!opts.json) {
+      if (!opts.json && !silent) {
         pulse(pulseKindOf(status), label);
         if (isBlocking(status)) printStageDetails(r);
       }
     }
   } finally {
     clearDetectorResultCache();
+    clearTestRunCache();
   }
   // STRICT SKIP-POLICY (F-67d2e9, generalizes the 0.5.x unit-only guard).
   // Under --strict, a skipped stage the spec DEMANDS is a fail: 1.1 when a
@@ -533,7 +617,7 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
         worst = Math.max(worst, 1);
         anyFailed = true;
         collected.push({stage: v.stage, label: v.label, status: 'fail', exitCode: 1, stderr: v.message});
-        if (!opts.json) pulse('fail', v.label, v.message);
+        if (!opts.json && !silent) pulse('fail', v.label, v.message);
       }
     } catch {
       /* spec unreadable → other detectors own it; don't block here */
@@ -549,6 +633,13 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
   //   STAMP   — a GREEN strict pre-push/all run writes spec/attestation.yaml
   //             (module tree-hashes per done feature), the committed,
   //             clone-portable freshness anchor STALE_ATTESTATION compares.
+  //   POLL    — under `silent` (the verdict poll) the EXEMPT half STILL runs: it
+  //             recomputes worst/anyFailed, which ARE the verdict, so a poll must
+  //             agree with `clad check`/`clad done` on a solely-stale tree
+  //             (AC-5d88c6b9 — same gate, one touch). Only the STAMP (the
+  //             writeAttestation mutation) is skipped: a poll is a read-only
+  //             stop-signal, never a verification of record. The next real
+  //             `clad check`/`clad done` does the writing.
   if (opts.strict && (tier === 'pre-push' || tier === 'all')) {
     const drift = collected.find((c) => c.stage === 'stage_1.3');
     const strictFailing = (drift?.findings ?? []).filter((f) => f.severity === 'error' || f.severity === 'warn');
@@ -563,9 +654,10 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
       drift.stderr = 'stale attestation exempted — this run re-verified and re-attests';
       anyFailed = collected.some((c) => isBlocking(c.status));
       worst = anyFailed ? Math.max(1, worst) : 0;
-      if (!opts.json) pulse('note', 'attestation', 'stale entries re-verified by this run — re-attesting');
+      if (!opts.json && !silent) pulse('note', 'attestation', 'stale entries re-verified by this run — re-attesting');
     }
-    if (!anyFailed) {
+    // STAMP — the mutation. A poll (silent) must never write spec/attestation.yaml.
+    if (!anyFailed && !silent) {
       if (gitOperationInProgress('.')) {
         if (!opts.json) pulse('note', 'attestation', 'deferred — git operation in progress; run the gate again after the merge/rebase completes.');
       } else {
@@ -579,18 +671,18 @@ export function runCheckStages(opts: {internal?: boolean; strict?: boolean; tier
       }
     }
   }
-  if (opts.json) {
+  if (opts.json && !silent) {
     // Machine-readable, UNTRUNCATED — findings carry file/line/suggestion so an
     // agent fixes in one pass instead of re-running to discover where + what.
     process.stdout.write(`${JSON.stringify({tier, worst, anyFailed, stages: collected}, null, 2)}\n`);
-  } else if (anyFailed) {
-    process.stdout.write('\nℹ Run `clad doctor` for the event log, or `clad sync` to validate spec shards. Drift findings above name the offending detector.\n');
+  } else if (anyFailed && !silent) {
+    process.stdout.write('\nℹ Run `clad doctor` for the event log, or `clad sync` to check the spec. The findings above say what drifted and why.\n');
   }
   // F-b84c38 — verification freshness needs a data source: every tier run
   // lands in the ledger (best-effort, deduped per identical HEAD/tier/strict/
-  // worst tuple so repeated identical runs add no growth).
+  // worst tuple so repeated identical runs add no growth). The poll counts too.
   recordEvent('.', 'gate_run', {tier, strict: opts.strict === true, worst, anyFailed});
-  return {worst, anyFailed};
+  return {worst, anyFailed, stages: collected};
 }
 
 /** Handler for `clad check`. Runs the tier's Iron Law stages; exits with worst code. */
@@ -732,7 +824,20 @@ export function runCheckCommand(opts: {internal?: boolean; strict?: boolean; tie
       process.exit(1);
     }
   }
-  process.exit(runCheckStages({...opts, focusModules}).worst);
+  const result = runCheckStages({...opts, focusModules});
+  // F-f4e184f7 + F-be5306eb: a non-blocking advisory when the feature cycle isn't
+  // being driven — code with no feature specs (cold-start), or undone features with
+  // no hook/CI. Suppressed under --json.
+  if (!opts.json) {
+    const advisory = featureCycleAdvisory('.');
+    if (advisory) process.stdout.write(`ℹ ${advisory}\n`);
+  }
+  // Set process.exitCode rather than process.exit(): the machine-output mode
+  // (--json) can write >64KB to stdout, and process.exit() terminates before a
+  // buffered stdout PIPE flushes — truncating the document for any consumer
+  // that pipes (vs. redirects to a file). Letting the event loop drain
+  // guarantees the full payload is emitted, then Node exits with this code.
+  process.exitCode = result.worst;
 }
 
 /**
@@ -741,8 +846,33 @@ export function runCheckCommand(opts: {internal?: boolean; strict?: boolean; tie
  * so `done` cannot claim more than the gate verifies. @see cli/done.ts
  */
 export function runDoneCommand(featureId: string): void {
-  const r = runDone('.', featureId, {checkStages: runCheckStages, onIndex: writeFeatureIndex, gitOpInProgress: gitOperationInProgressName});
+  // F-c566f590 — load the project's independence policy + the evidence ledger and
+  // hand them to runDone as its optional independence seam. A spec that will not
+  // load simply omits the seam (runDone finds the shard directly and stays on its
+  // pre-independence path). readEvidence is read-only.
+  let independence: {policy: 'label' | 'require'; evidence: ReturnType<typeof readEvidence>} | undefined;
+  try {
+    const spec = loadSpec('.');
+    independence = {policy: spec.project.independence_policy ?? 'label', evidence: readEvidence('.')};
+  } catch {
+    independence = undefined;
+  }
+  const r = runDone('.', featureId, {
+    checkStages: runCheckStages,
+    onIndex: writeFeatureIndex,
+    gitOpInProgress: gitOperationInProgressName,
+    independence,
+  });
   pulse(r.ok ? 'pass' : 'fail', `done · ${featureId}`, r.reason);
+  // Surface the independence label as a concise plain note (only once the gate
+  // actually ran — the early refusals carry no label). Soft-shell wording.
+  if (r.independence) {
+    const line =
+      r.independence === 'independent'
+        ? 'independence: independent — backed by human or independent review'
+        : 'independence: self-certified — no independent or human review yet';
+    pulse('note', `done · ${featureId}`, line);
+  }
   process.exit(r.code);
 }
 
@@ -807,6 +937,7 @@ export function runOracleCommand(featureId: string | undefined, opts: {ac?: stri
 function printStageDetails(
   r: {
     stderr?: string;
+    hint?: string;
     findings?: readonly {detector: string; severity: string; message: string; path?: string}[];
   },
 ): void {
@@ -825,6 +956,8 @@ function printStageDetails(
     if (surface.length > 3) {
       process.stdout.write(`    … and ${surface.length - 3} more finding(s)\n`);
     }
+    // F-4643d99d: a one-line remediation hint under a failing tool stage.
+    if (r.hint) process.stdout.write(`    fix: run \`${r.hint}\`\n`);
     return;
   }
   if (r.stderr && r.stderr.trim().length > 0) {
@@ -943,7 +1076,7 @@ export function runRouteCommand(prompt: string): void {
  */
 export function createProgram(): Command {
   const program = new Command();
-  program.name('clad').description('Reference Ironclad CLI').version('0.8.2');
+  program.name('clad').description('Reference Ironclad CLI').version('0.9.2');
 
   program
     .command('init [intent...]')
@@ -960,6 +1093,7 @@ export function createProgram(): Command {
     .option('--roots <list>', 'Override scanner source roots, comma-separated (e.g. packages/a/src,packages/b/src). Otherwise inferred from manifests + directory heuristics.')
     .option('--with-hook', 'Install git pre-commit (cheap tier) AND pre-push (strict tier) hooks. Opt-in; cladding never touches .git without it.')
     .option('--with-ci', 'Scaffold .github/workflows/cladding.yml running the strict pre-push gate — the authoritative enforcement layer.')
+    .option('--json', 'emit the raw InitResult for tooling; default is the human-readable surface')
     .action(runInitCommand);
 
   program
@@ -983,14 +1117,16 @@ export function createProgram(): Command {
 
   program
     .command('setup')
-    .description('Wire cladding into installed AI tool host channels (Claude Code / Codex / Gemini)')
-    .option('--force', 'overwrite directory-copy wires (Windows fallback) even when changes detected')
+    .description('Activate Cladding only for the current project (Claude Code / Codex / Gemini / Antigravity / Cursor)')
+    .option('--project <path>', 'activate a project other than the current directory')
+    .option('--host <host>', 'activate detected hosts (default), all, or one of: claude, codex, gemini, antigravity, cursor')
+    .option('--force', 'replace an existing conflicting cladding-owned project entry')
     .option('--quiet', 'suppress stdout output')
     .action(runSetupCommand);
 
   program
     .command('update')
-    .description('Run from a project dir AFTER `npm update -g cladding`: re-wire hosts + sync inventory + refresh the managed CLAUDE.md/AGENTS.md section, then report (without blocking) what the now-stricter detectors flag')
+    .description('Run from a project dir AFTER `npm update -g cladding`: refresh project host wiring + sync inventory + refresh managed CLAUDE.md/AGENTS.md, then report stricter detector findings')
     .action(runUpdateCommand);
 
   program
@@ -1047,6 +1183,13 @@ export function createProgram(): Command {
     .description('Print the blast radius for a change — what depends on a feature/file + the tests to re-run (F-7794a6bc)')
     .option('--depth <n>', 'bound the dependent walk to N hops (default: the full transitive radius)')
     .action((query, opts) => runImpactCommand(query, opts));
+
+  program
+    .command('verdict')
+    .description('One-poll loop decision: DONE|ITERATE|ESCALATE|BLOCKED|BOOTSTRAP over the pre-push strict gate + feature statuses (F-2e28cc72). Single gate touch; DONE requires ≥1 non-liveness proof.')
+    .option('--json', 'emit the verdict object as JSON')
+    .option('--tier <tier>', 'gate tier (default pre-push)')
+    .action((opts) => runVerdictCommand(opts, {checkStages: runCheckStages}));
 
   program
     .command('infer-deps')
@@ -1160,7 +1303,7 @@ export function createProgram(): Command {
     .description('Summarise .cladding/events.log.jsonl — sentinel-miss frequency by phase/cause/fallback plus the top missed sentinels (LLM dispatcher health check)')
     .option('--cwd <path>', 'project directory to read events from (default cwd)')
     .option('--json', 'emit the raw DoctorReport for tooling; default is the human-readable surface')
-    .option('--hosts', 'smoke-test host CLIs (claude/gemini/codex) + Cursor wiring → dated artifact + docs/dogfood/matrix.md. Live LLM prompts run only with consent (CLAD_HOST_SMOKE=1 or --yes); otherwise not-run')
+    .option('--hosts', 'smoke-test host CLIs (Claude Code / Gemini / Antigravity / Codex / Cursor) and project wiring → dated artifact + docs/dogfood/matrix.md. Live LLM prompts run only with consent (CLAD_HOST_SMOKE=1 or --yes); otherwise not-run')
     .option('--yes', 'grant live-run consent for --hosts (equivalent to CLAD_HOST_SMOKE=1)')
     .option('--matrix-only', 'regenerate docs/dogfood/matrix.md from the newest host-smoke artifact without any probing')
     .action((opts) => {

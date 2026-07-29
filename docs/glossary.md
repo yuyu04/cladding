@@ -56,7 +56,7 @@
 | `work` | removed (0.6.0) | Was a permanently not-implemented reserved stub (always exit 2) — dishonest surface; `run` owns the slot. | (제거됨) |
 | `serve` | stable | Start the MCP server over stdio. | MCP 서버 |
 | `oracle` | stable | Print the impl-blind authoring brief for a feature/AC. | 오라클 브리프 |
-| `setup` | stable | Wire cladding into installed AI hosts (Claude/Codex/Gemini/Cursor). | 호스트 연결 |
+| `setup` | stable | Wire cladding into detected AI hosts (Claude/Codex/Gemini/Antigravity/Cursor). | 호스트 연결 |
 | `update` | stable | Post-upgrade reconciliation (re-wire, sync, report-only drift). | 업그레이드 정리 |
 | `doctor` | stable | Diagnose dispatcher/telemetry health from the events log (brew/npm `doctor` convention). | 환경 진단 |
 | `checkpoint` | stable | Record a feature checkpoint event (git HEAD + spec digest). | 체크포인트 기록 |
@@ -64,6 +64,7 @@
 | `route` | stable | Classify a natural-language prompt to a verb (debug surface for the router). | 의도 분류 |
 | `context` | stable (0.6.0) | Print the context slice for one feature (focus + ancestors + scenarios + ai_hints + test_refs) — the Least Context principle, mechanized. | 컨텍스트 슬라이스 |
 | `impact` | stable (0.7.0) | Print the blast radius for a change — the transitive dependents of a feature/file plus the scenarios and the regression test set to re-run. The backward complement of `context` (what depends on this, vs what this needs). | 영향 반경(blast radius) |
+| `verdict` | stable (0.8.x) | One-poll loop decision: reduces the pre-push strict gate + feature statuses to ONE of `DONE` \| `ITERATE` \| `ESCALATE` \| `BLOCKED` \| `BOOTSTRAP` with a `next_action` pointer + `remaining` list. Runs the SAME gate once per poll (never a re-implementation); `DONE` requires a green gate AND every feature done AND ≥1 non-liveness behavioral proof. A read-only poll — never stamps attestation. | 루프 판정(1회 폴) |
 | `measure` | stable (0.7.0) | Report the search + context efficiency the graph provides per feature — working-set tokens vs the naive (shard + all module files) baseline, dependency depth/edges resolved, regression-set coverage. Deterministic; measures what the graph CAN provide, not agent adoption. | 효율 측정 |
 | `infer`-deps | stable (0.7.0) | Suggest feature `depends_on` edges from the code import graph — the dependency edges cladding never auto-produced. Resolves each module's imports to the owning feature; prints reviewable suggestions (a human merges them — anti-self-cert). | 의존 추론 |
 | `graph` | stable (0.7.0) | Render the spec↔code↔doc knowledge graph: `export` → mermaid/dot/json/Obsidian-vault or a self-contained offline `html` viewer (WebGL, three.js bundled); `serve` → the same viewer live on localhost, auto-reloading as spec/docs change; `stats` → counts + hubs. | 지식 그래프 |
@@ -85,15 +86,23 @@
 
 | Tool | Meaning |
 |---|---|
+| `clad_prepare_init` | Read the project and return a bounded briefing plus one-time token; never writes files. |
+| `clad_stage_init` | Validate the host-model onboarding draft and cache it only as ignored project runtime state for a later approval turn. |
+| `clad_init` | Validate and apply the host model's structured onboarding draft. |
+| `clad_prepare_clarify` | Read current onboarding state and prepare a real user answer for host-model refinement. |
+| `clad_clarify` | Validate and apply the host model's structured refinement draft. |
+| `clad_resolve_onboarding_review` | Apply only the onboarding proposal targets the user explicitly reviewed and approved. |
 | `clad_list_features` | Query features by status/slug. |
 | `clad_get_feature` | Fetch one feature + ACs by id or slug. |
 | `clad_run_check` | Run drift detection in-process (terse by default). |
 | `clad_get_events` | Tail the lifecycle event log. |
-| `clad_create_feature` | Author a feature shard with hash id + ACs. |
+| `clad_create_feature` | Author a feature shard with hash id + ACs + a durable design-impact decision. |
+| `clad_resolve_design_impact` | Mark structural design impact resolved after every listed Tier-B artifact actually changed. |
 | `clad_create_scenario` | Author a scenario shard with hash id. |
 | `clad_link_capability` | Upsert a capability ↔ feature binding (Tier B). |
 | `clad_author_oracle` | Record a host-authored impl-blind oracle + provenance. |
 | `clad_run_gate` | Run the real Iron Law gate for a tier in-session (0.6.0; strict by default). Payloads carry `schema_version`. |
+| `clad_verdict` | One-poll loop decision (0.8.x) — runs the real pre-push strict gate ONCE and reduces it to `{verdict, next_action, remaining}` (`DONE` \| `ITERATE` \| `ESCALATE` \| `BLOCKED` \| `BOOTSTRAP`). Call INSTEAD OF `clad_run_gate` per loop turn (it subsumes the gate touch); a poll that answers ITERATE/ESCALATE is a success, not an error. |
 | `clad_get_context` | The context slice for one feature by id/slug/module path (0.6.0) — dispatch the slice, never the whole spec. |
 | `clad_get_working_set` | The token-budgeted working set for one feature/module (0.7.0) — focus + module CODE excerpts + forward needs + backward breaks + verify + budget, fused in one call; the code-bearing superset of `clad_get_context` (which stays frozen). |
 | `clad_get_impact` | The blast-radius slice for a change by feature id/slug/module path (0.7.0) — transitive dependents + scenarios at risk + the regression test set; the backward complement of `clad_get_context`. |
@@ -145,7 +154,7 @@ four distinct Korean words too, so the conflation cannot survive translation:
 
 `stage_started` · `stage_completed` · `feature_activated` · `feature_completed` · `evidence_recorded` · `drift_detected` · `feature_checkpoint` · `feature_rolled_back` · `sentinel_miss`
 
-Added 0.6.0 (F-b84c38 — payloads carry `identity` + `head`): `feature_created` (spec shard authored) · `scenario_created` · `done_attempted` (gated flip, kept or reverted) · `gate_run` (tier verification outcome; deduped per identical HEAD/tier/strict/worst) · `stop_blocked` (F-1d23a6 — the Stop host hook blocked a session end on a fresh failure fingerprint; identical fingerprints demote without an event).
+Added 0.6.0 (F-b84c38 — payloads carry `identity` + `head`): `feature_created` (spec shard authored) · `scenario_created` · `done_attempted` (gated flip, kept or reverted) · `gate_run` (tier verification outcome; deduped per identical HEAD/tier/strict/worst) · `stop_blocked` (F-1d23a6 — the Stop host hook blocked a session end on a fresh failure fingerprint; identical fingerprints demote without an event). `design_impact_resolved` records that a structural feature's reviewed Tier-B changes were applied.
 
 Added 0.8.0 (F-6ba22c5c — value-delivery telemetry, so a silent surface is distinguishable from an unwired one): `impact_card_fired` (a PostToolUse impact card produced output — payload file/feature/impacted/tests/unledgered) · `impact_card_skipped` (the card was skipped — `reason` ∈ a closed enum, one per degrade branch; the two high-frequency reasons are aggregated to one event per debounce window) · `session_card_rendered` (a non-empty SessionStart card — payload bytes) · `prompt_suggestion_served` (a non-empty UserPromptSubmit suggestion — payload kind) · `working_set_served` (an MCP read serve of `clad_get_working_set` / `clad_get_context` / `clad_get_impact` — payload tool/query/resolved). Summarized by `clad measure --sessions` as DELIVERY (did the surfaces fire), never adoption.
 

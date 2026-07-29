@@ -14,10 +14,14 @@ docs:
     features: [F-06dfdad6, F-7794a6bc]
   "docs/ab-evaluation/case-iterative-vs-fixed-vapt.md":
     features: [F-7794a6bc, F-96250595]
+  "docs/ab-evaluation/case-role-contract-ablation.md":
+    features: [F-600272d7]
   "docs/ab-evaluation/case-working-set-landmine.md":
     features: [F-06dfdad6]
   "docs/conventions.md":
     doc_links: ["docs/code-style.md"]
+  "docs/gate-stages.md":
+    doc_links: ["src/stages/detectors/README.md"]
   "docs/glossary.md":
     features: [F-1d23a6, F-36f11b, F-60b842, F-6aebb9, F-6ba22c5c, F-7ce18e, F-b84c38]
   "docs/i18n-haiku-relay.md":
@@ -30,7 +34,7 @@ docs:
     features: [F-4db939, F-ba2e05]
     doc_links: ["docs/ab-evaluation/README.md", "docs/ssot-model.md", "docs/ssot-testing.md"]
   "docs/refinement-backlog.md":
-    features: [F-066, F-06dfdad6, F-073, F-16138071, F-27e56a00, F-3c2bf8b9, F-d25041ac, F-fe0f7a96]
+    features: [F-066, F-06dfdad6, F-073, F-16138071, F-27e56a00, F-3c2bf8b9, F-3fd220d8, F-d25041ac, F-fe0f7a96]
   "docs/ssot-model.md":
     features: [F-001]
   "docs/ssot-testing.md":

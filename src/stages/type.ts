@@ -13,6 +13,7 @@ import process from 'node:process';
 
 import {execaSync} from 'execa';
 
+import {withFindings} from './finding-parser.js';
 import {resolveStageCommand} from './toolchain/scoped-command.js';
 import type {CommandStageOptions, StageResult} from './types.js';
 import {missingToolSkip, ranToolResult} from './util.js';
@@ -57,11 +58,13 @@ export function runType(opts: CommandStageOptions = {}): StageResult {
   const proc = execaSync(cmd, [...args], {cwd, reject: false});
   // execaSync(reject:false) RETURNS (does not throw) on a missing binary;
   // detect ENOENT on the result so a missing tool skips, not false-fails.
-  const skip = missingToolSkip(STAGE, cmd, proc);
+  const skip = missingToolSkip(STAGE, cmd, proc, args);
   if (skip) return skip;
   // The tool RAN. Map its result to cladding's pass/fail/skip contract:
   // any non-zero exit → blocking fail (1), never the tool's raw 2 (= skip).
-  return ranToolResult(STAGE, proc);
+  // ADDITIVE (F-b7873005): on failure, attach structured findings parsed from
+  // the tool's own output — the raw stderr is preserved unchanged.
+  return withFindings('type', ranToolResult(STAGE, proc), proc);
 }
 
 // CLI entry — `tsx stages/type.ts` or `npm run stage:type`.

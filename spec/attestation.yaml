@@ -14,17 +14,18 @@
 # `clad check --tier=pre-push --strict`; the GREEN gate rewrites the truth.
 # Content-anchored: survives fresh clones and squash/rebase.
 attested_modules:
-  .claude-plugin/marketplace.json: 4875265deab1e487
   .claude/settings.json: d0bba3583aef0960
   .github/workflows/ci.yml: 8ea99219cb80df60
-  .gitignore: 4e5899550999ddc8
-  CHANGELOG.md: 0c0ce6ff13bd4167
-  CLAUDE.md: d81d8832976cd5ee
+  .gitignore: 1294975ba3b47043
+  CHANGELOG.md: 033d721cd4fe05a4
+  CLAUDE.md: 9f2fa4edd5c6df80
   GOVERNANCE.md: 21cc28eaaf637a20
-  README.html: 48b4bd35908408db
-  README.ko.html: bdb58f0418820473
-  README.ko.md: 07ead88e3fc66485
-  README.md: e88ba330060d13e6
+  README.html: 490eab86b9c0d208
+  README.ja.md: 3c4f3453ba97a3a6
+  README.ko.html: dd48adf81a1d382c
+  README.ko.md: 383011eabecf55a2
+  README.md: c84d37f3d8726f5c
+  README.zh.md: 014fe3859fdbb8dc
   SECURITY.md: df1d0c80304b2f28
   bin/clad: 77b80666665dd1b0
   conformance/fixtures.yaml: 4b1b94dae1cd20b0
@@ -37,10 +38,10 @@ attested_modules:
   docs/ab-evaluation/README.md: 2467808b9871dcf0
   docs/ab-evaluation/case-doverunner-scale.md: 2a435b6855823d41
   docs/ab-evaluation/case-efficiency-measurement.md: 348aca146a7b2faa
-  docs/ab-evaluation/case-existing-adoption.md: 8e86e9a3e60c64fe
+  docs/ab-evaluation/case-existing-adoption.md: 240a7c641da50a42
   docs/ab-evaluation/case-graph-efficiency.md: 83d3956d14a1517d
   docs/ab-evaluation/case-iterative-vs-fixed-vapt.md: 1d242b8b6071f343
-  docs/ab-evaluation/case-payment-saas.md: 0ecb089a576de638
+  docs/ab-evaluation/case-payment-saas.md: a316271b319816f6
   docs/ab-evaluation/case-working-set-landmine.md: b4f44dc463e99722
   docs/ab-evaluation/summary.md: 59e527a531f13209
   docs/b1-adoption-protocol.md: a041d8ad5ba1447f
@@ -49,65 +50,76 @@ attested_modules:
   docs/benchmarks/v0.4.0-consistency-bench.md: e49a0dc671ff6672
   docs/benchmarks/v0.6.0-real-user-verification.md: 9af806f48f681d1a
   docs/code-style.md: f1fd100fa0d11c5e
+  docs/dogfood/antigravity-cli-2026-07-15.md: c7191d8548535998
   docs/dogfood/claude-code-2026-05-20.md: 04870d41e75576d6
+  docs/dogfood/codex-cli-2026-07-15.md: 4ed02eed031aeda8
+  docs/dogfood/cursor-agent-2026-07-15.md: a2f621fd0c3b57af
   docs/dogfood/gemini-cli-2026-05-20.md: 2da1ba66c4f108f0
-  docs/feature-cycle.md: 6af4ff8fe15db28a
-  docs/glossary.md: ded8d10136bf177a
-  docs/img/en/ecosystem.svg: 686fb1eb2b93711c
-  docs/img/en/relationship.svg: 67470f930df33119
-  docs/img/ko/ecosystem.svg: 7c9b2d68fdaa70cf
-  docs/img/ko/relationship.svg: e71e2327ca835fcf
+  docs/feature-cycle.md: e1847cc9fe9b6eb6
+  docs/glossary.md: 9e897b963c3aa88f
+  docs/img/en/ecosystem.svg: ed14d1d17f088b00
+  docs/img/en/independence.svg: 1b3048b3b5206483
+  docs/img/en/relationship.svg: c7a24203925b4664
+  docs/img/ja/independence.svg: 833069d091d4606c
+  docs/img/ko/ecosystem.svg: 2b7341576c2af0a8
+  docs/img/ko/independence.svg: 7921a18eb9478462
+  docs/img/ko/relationship.svg: 9ec8fb2254978f37
+  docs/img/zh/independence.svg: 073303a42e601f7c
   docs/multi-provider-roadmap.md: 1e5cf27ea1b18d06
-  docs/refinement-backlog.md: 3e38d60bf987eef1
+  docs/refinement-backlog.md: 918426e582bf2739
+  docs/setup.md: a5c062651d267983
   docs/spec-ids-multi-dev.md: 28d58e84879f58b1
-  docs/ssot-model.md: 2ecedd961ce4f721
-  docs/ssot-testing.md: a067d2b99852db9a
-  package.json: 763da9b4483037df
-  plugins/claude-code/.claude-plugin/plugin.json: 90190832d41aafb2
-  plugins/claude-code/agents/developer.md: b0ef3775132d159a
-  plugins/claude-code/agents/observability.md: 81f73e284ee9b3ba
-  plugins/claude-code/agents/orchestrator.md: d30919c2b78b88e4
-  plugins/claude-code/agents/planner.md: 9514f785ba65a58c
-  plugins/claude-code/agents/reviewer.md: 91922293457a3d6a
-  plugins/claude-code/commands/init.md: b7b5beedee6ddafb
+  docs/ssot-model.md: 66b9439e2f71ac4b
+  docs/ssot-testing.md: abf3b2bd5acb29a1
+  package-lock.json: efa9090e0ef4bf1f
+  package.json: 00272205b48b15df
+  plugins/claude-code/.claude-plugin/plugin.json: fcfe09c82ca6492b
+  plugins/claude-code/agents/developer.md: 3002b4ef69ddab43
+  plugins/claude-code/agents/observability.md: 637fde18c012e2a7
+  plugins/claude-code/agents/orchestrator.md: 1b758de0bdab8eb0
+  plugins/claude-code/agents/planner.md: d1f895a20fb3a3ed
+  plugins/claude-code/agents/reviewer.md: cdf7469a3e58b438
+  plugins/claude-code/commands/init.md: 5529b13d0f1ab4bf
   plugins/claude-code/hooks/hooks.json: 42321ead26fb1da8
-  plugins/codex/.codex-plugin/plugin.json: 75a45bd1527569fb
+  plugins/codex/.codex-plugin/plugin.json: da272fa283026dc2
   plugins/codex/.mcp.json: 43e3f4b2af24aa18
-  plugins/codex/skills/check/SKILL.md: 355826df90846d2f
-  plugins/codex/skills/developer/SKILL.md: b0ef3775132d159a
-  plugins/codex/skills/init/SKILL.md: b7b5beedee6ddafb
-  plugins/codex/skills/observability/SKILL.md: 81f73e284ee9b3ba
-  plugins/codex/skills/orchestrator/SKILL.md: d30919c2b78b88e4
-  plugins/codex/skills/planner/SKILL.md: 9514f785ba65a58c
-  plugins/codex/skills/reviewer/SKILL.md: 91922293457a3d6a
-  plugins/codex/skills/run/SKILL.md: 43683062ac062846
-  plugins/codex/skills/serve/SKILL.md: 4cee65dfb691e3b0
-  plugins/codex/skills/status/SKILL.md: b3cb6e7a12bf4023
-  plugins/codex/skills/sync/SKILL.md: 709c20212aa5627e
+  plugins/codex/skills/check/SKILL.md: 6a665422af510e72
+  plugins/codex/skills/developer/SKILL.md: 3002b4ef69ddab43
+  plugins/codex/skills/init/SKILL.md: 5529b13d0f1ab4bf
+  plugins/codex/skills/observability/SKILL.md: 637fde18c012e2a7
+  plugins/codex/skills/orchestrator/SKILL.md: 1b758de0bdab8eb0
+  plugins/codex/skills/planner/SKILL.md: d1f895a20fb3a3ed
+  plugins/codex/skills/reviewer/SKILL.md: cdf7469a3e58b438
+  plugins/codex/skills/run/SKILL.md: 9f95ff17d70c8dd1
+  plugins/codex/skills/serve/SKILL.md: f08bbdbbfeb05041
+  plugins/codex/skills/status/SKILL.md: 09faadc50b3449da
+  plugins/codex/skills/sync/SKILL.md: 775c0f990a52a3d9
   plugins/gemini-cli/GEMINI.md: ba08eaf2cd557a65
   plugins/gemini-cli/commands/README.md: 3527d771578431bd
-  plugins/gemini-cli/commands/init.toml: fbf24f25bb8cf921
-  plugins/gemini-cli/gemini-extension.json: 2b2c445627994759
-  scripts/build-plugin.mjs: 57ffa3f0e6317a6b
+  plugins/gemini-cli/commands/init.toml: e7f310fd7af23f95
+  plugins/gemini-cli/gemini-extension.json: 729b2c69fdc0b650
+  scripts/build-plugin.mjs: 7fabe2b6301b142a
   scripts/build.mjs: 3a4b204063024ef1
   scripts/migrate-dogfood-v0.3.16.mjs: 1e265fb370019996
   scripts/shard-spec.ts: 0c728bbc1e869421
-  scripts/version-bump.mjs: 05a3aa76667ed9ce
-  skills/check/SKILL.md: 355826df90846d2f
-  skills/checkpoint/SKILL.md: 97bde8bd4553d38f
-  skills/clarify/SKILL.md: 4b1e37af84817586
-  skills/doctor/SKILL.md: 5363d3b34e69c516
-  skills/init/SKILL.md: b7b5beedee6ddafb
-  skills/oracle/SKILL.md: 3fc7f21e0309dad3
-  skills/rollback/SKILL.md: 2597ab798e61ded8
-  skills/route/SKILL.md: 624a6cf60db7960d
-  skills/run/SKILL.md: 43683062ac062846
-  skills/serve/SKILL.md: 4cee65dfb691e3b0
-  skills/status/SKILL.md: b3cb6e7a12bf4023
-  skills/sync/SKILL.md: 709c20212aa5627e
-  spec.yaml: 1c78f0a81a620856
+  scripts/test-count.d.mts: a392f5dea372a40e
+  scripts/test-count.mjs: aea2620221c8d5ff
+  scripts/version-bump.mjs: 770b066b8279db39
+  skills/check/SKILL.md: 6a665422af510e72
+  skills/checkpoint/SKILL.md: f723e8cfb8286a64
+  skills/clarify/SKILL.md: 5d08bbb821258d03
+  skills/doctor/SKILL.md: 6581c6c900c72d68
+  skills/init/SKILL.md: 5529b13d0f1ab4bf
+  skills/oracle/SKILL.md: 11e111ac0a4963c1
+  skills/rollback/SKILL.md: d472dc3a562b347b
+  skills/route/SKILL.md: 5958830fef280c67
+  skills/run/SKILL.md: 9f95ff17d70c8dd1
+  skills/serve/SKILL.md: f08bbdbbfeb05041
+  skills/status/SKILL.md: 09faadc50b3449da
+  skills/sync/SKILL.md: 775c0f990a52a3d9
+  spec.yaml: ea944be3d843f018
   spec/README.md: 7c257426396d435c
-  spec/architecture.yaml: c5d911049fbdcd48
+  spec/architecture.yaml: f0888480405a13a8
   spec/features/: a4d0f0eb87fed960
   spec/features/drive-auto-rollback-2de65d.yaml: ea0a35cd2cc7e49b
   spec/features/scan-bfs-walk-31eeb8.yaml: 408efcb8a07557ac
@@ -122,31 +134,33 @@ attested_modules:
   src/adapters/host/sampling-context.ts: 205cb5734072d638
   src/adapters/host/transport.ts: d284372b247bd27d
   src/adapters/index.ts: 8b4c3c29a6de75aa
-  src/adapters/sdk/anthropic.ts: 1b77b2dbc73a9e84
-  src/adapters/types.ts: 59a12bbca0601944
+  src/adapters/sdk/anthropic.ts: 9debe5cc61f039f1
+  src/adapters/types.ts: f8e5643231a13e8d
   src/agents: a4d0f0eb87fed960
-  src/agents/README.md: 9f41809958439db2
-  src/agents/blind-author.md: c4c89882adce01ce
-  src/agents/developer.md: b0ef3775132d159a
+  src/agents/README.md: b9fe459af1d36e8d
+  src/agents/blind-author.md: a3106e12181667d5
+  src/agents/developer.md: 3002b4ef69ddab43
   src/agents/loader.ts: 6d35560c47f9ae85
-  src/agents/observability.md: 81f73e284ee9b3ba
-  src/agents/orchestrator.md: d30919c2b78b88e4
-  src/agents/planner.md: 9514f785ba65a58c
-  src/agents/reviewer.md: 91922293457a3d6a
+  src/agents/observability.md: 637fde18c012e2a7
+  src/agents/orchestrator.md: 1b758de0bdab8eb0
+  src/agents/planner.md: d1f895a20fb3a3ed
+  src/agents/reviewer.md: cdf7469a3e58b438
   src/changelog/collect.ts: a6c936a7b8c34e2a
   src/changelog/render.ts: 83dd2d95f24ca68c
   src/cli: a4d0f0eb87fed960
   src/cli/benchmark.ts: 77f84d2a898d724f
   src/cli/changelog.ts: 2de1adb009b89ab4
-  src/cli/clad.ts: 57f130c71eb939da
-  src/cli/clarify.ts: ff084951de081592
-  src/cli/doctor-hosts.ts: 1ad79105b47fd8e5
+  src/cli/clad.ts: 0501f16f74b2a8dc
+  src/cli/clarify.ts: f17177969d5b75ff
+  src/cli/doctor-hosts.ts: 1f0c2cec5a310b81
   src/cli/doctor.ts: b98b955fe75e7f7e
-  src/cli/done.ts: ad2b2d49034296bd
+  src/cli/done.ts: b4c8ed409f001487
+  src/cli/enforcement-advisory.ts: 395c5be696e88b5c
   src/cli/graph-serve.ts: 23e6e389225d0f98
   src/cli/graph.ts: bab410061b8c746a
-  src/cli/hook.ts: a856ab95e025bb75
-  src/cli/init.ts: 71f2c08113f6b22b
+  src/cli/hook.ts: 59d5fddd52d330ac
+  src/cli/host-onboarding.ts: b046571d4be7280c
+  src/cli/init.ts: 91cf7be2b7427fbf
   src/cli/intent-from-path.ts: e69862821d979f22
   src/cli/measure.ts: 3a562f16589e26c2
   src/cli/report.ts: 911f859b2446834b
@@ -158,17 +172,17 @@ attested_modules:
   src/cli/scan/greenfield-seeds.ts: ff462b4a19f081f3
   src/cli/scan/helpers.ts: 396c73992ded0e22
   src/cli/scan/index.ts: c23f21c487c8abcb
-  src/cli/scan/intent-onboarding.ts: 46d6e2f3d060d5ca
+  src/cli/scan/intent-onboarding.ts: 2172608a4df3b866
   src/cli/scan/llm.ts: e6a91e97f9873531
-  src/cli/scan/onboarding-state.ts: a5e8513fc8355e6e
+  src/cli/scan/onboarding-state.ts: 2353e89f3c64c563
   src/cli/scan/roots.ts: 7475eed8c9836531
   src/cli/scan/scenarios.ts: 6c2a4ce3b469a668
-  src/cli/scan/spec-lang.ts: acdbe035a63396d8
   src/cli/scan/stats.ts: 00c737b7b7acad97
   src/cli/scan/thresholds.ts: ec0047b894a6aa6a
   src/cli/scan/types.ts: ea0170aa88c1c14a
   src/cli/scan/walker.ts: 33e4448e365e47c6
-  src/cli/update.ts: 6e8b44d72cf46269
+  src/cli/update.ts: b0151396c9a0f6ca
+  src/cli/verdict.ts: 85a4ef27292b9169
   src/core/checkpoint.ts: 63300c2764533b6c
   src/core/git-ops.ts: 4544bde493a0628f
   src/core/postmortem.ts: 73be29d5e8a16fd4
@@ -176,9 +190,9 @@ attested_modules:
   src/drive: a4d0f0eb87fed960
   src/drive/agent.ts: 8daf2728db01a8c9
   src/drive/halt.ts: 386dd57f84f8e297
-  src/drive/loop.ts: 51cf1386a8640f50
+  src/drive/loop.ts: c37e15ece8e2ae41
   src/events: a4d0f0eb87fed960
-  src/events/log.ts: 98ea4c27e3cad96c
+  src/events/log.ts: ed70cf9bfeb2eaf0
   src/events/session-report.ts: d0b34f848c360334
   src/graph/layout3d.ts: fdbf08bacad2c049
   src/graph/model.ts: 9dfae1cb48bfe3d5
@@ -192,27 +206,25 @@ attested_modules:
   src/hitl/anti-self-cert.ts: 53a714d8e489d00a
   src/hitl/audit.ts: 79b06e904815469a
   src/hitl/identity.ts: 52ff84aa666f1dab
-  src/init/git-hook.ts: 4e02f177b3764ae8
-  src/init/host-instructions.ts: f6d10695ef0c4763
-  src/init/host-setup.ts: ee6bca9c8fbc2fb2
+  src/hitl/independence.ts: 202f4e5ef8bc69e3
+  src/init/agents-md.ts: 698b2a38ddd5d1a6
+  src/init/git-hook.ts: b77910b0df392cbf
+  src/init/host-instructions.ts: c598f8598d8d1cd4
+  src/init/host-setup.ts: 158cc9306a746da1
   src/optimizer: a4d0f0eb87fed960
   src/optimizer/code-excerpt.ts: e2c4598efcd28d2a
-  src/optimizer/compress-native.ts: af99b3b3fc1b238a
-  src/optimizer/compress-types.ts: eab781281b3b3149
   src/optimizer/context-slice.ts: b5864aaed1e7ae48
-  src/optimizer/headroom.ts: 921d1f118f4cffba
   src/optimizer/infer-depends-on.ts: 511d626a96b3da90
   src/optimizer/iterative-slice.ts: 67f8bcd4471eaeb9
-  src/optimizer/lang-normalize.ts: 35868b3354a5579f
   src/optimizer/measure-ledger.ts: 1e644cacaf878527
   src/optimizer/measurement.ts: 55ab003adaec49a9
   src/optimizer/preamble.ts: f74d41daf8372cdf
-  src/optimizer/profiles.ts: 5762c3f4ef1f79d1
+  src/optimizer/prior-attempts.ts: 5dd54d3a38312635
   src/optimizer/prune.ts: f5f70fb850f167bc
   src/optimizer/push-card.ts: c7cc2d710fcfd1dc
   src/optimizer/reverse-slice.ts: 81c2e99e65bdd359
   src/optimizer/tail.ts: 5cdce1a3afd1eb7e
-  src/optimizer/working-set.ts: fd26740a8c0019ae
+  src/optimizer/working-set.ts: 9eb05ceea841a674
   src/oracle/payload.ts: 0171633d758ceed8
   src/oracle/policy.ts: 8919ad927bd59b08
   src/oracle/record.ts: 0b9c124225abe1ac
@@ -221,7 +233,7 @@ attested_modules:
   src/report/sarif.ts: 71e97aceeb0a4473
   src/router: a4d0f0eb87fed960
   src/router/intent.ts: 430590f761b891a6
-  src/serve/server.ts: ec214208cb6762ad
+  src/serve/server.ts: a63dde88609a6abe
   src/spec: a4d0f0eb87fed960
   src/spec/attestation.ts: 294a1e99c42d4aef
   src/spec/cli.ts: 7a9bcd0f66677810
@@ -231,31 +243,32 @@ attested_modules:
   src/spec/feature-id.ts: 2b6335aac848a3de
   src/spec/inventory.ts: 2cd34dfb665f422f
   src/spec/load.ts: 9fe2fe74053bf7e3
-  src/spec/new.ts: ae698bb51309c05e
+  src/spec/new.ts: 4c91f6d41acaab69
   src/spec/parse.ts: 1eab9a28c9359a45
   src/spec/reverse-index.ts: d8b003eb8f1918c8
-  src/spec/schema.json: 7e26bc66cb0fc359
+  src/spec/schema.json: 848951cd01d7f82f
   src/spec/test-ref-repair.ts: 5ce823b479aaaca3
-  src/spec/types.ts: 8279f66aed33d569
+  src/spec/types.ts: 5799bc9fc1e00553
   src/spec/validate.ts: db88ca6512ab363a
   src/stages: a4d0f0eb87fed960
+  src/stages/README.md: c79d2bced8c8b8d8
   src/stages/arch.ts: 268422e53c6d20bb
   src/stages/audit.ts: 3ba117606f8a81a1
   src/stages/commit.ts: f6b6836af0a4d96c
-  src/stages/cov.ts: f7c7bff90ef9c868
+  src/stages/cov.ts: 3dbe8381e374e8c0
   src/stages/deliverable-smoke.ts: 9ecfd4210e6ec5c0
   src/stages/detector-result-cache.ts: 93ea6af02ef361c5
-  src/stages/detectors/README.md: 2e136e4f61e6d6bb
+  src/stages/detectors/README.md: 12e8d24351eef05c
   src/stages/detectors/absence-of-governance.ts: 954d8ce5c45b3b32
   src/stages/detectors/ac-drift.ts: 1bceeae9ee99080b
   src/stages/detectors/ac-duplicate-within-feature.ts: 652ad48c8cd1ab2e
   src/stages/detectors/ai-hints-forbidden-pattern.ts: 96b225595ffd4d0a
   src/stages/detectors/architecture-from-spec.ts: ee36fa5f94a5be2a
   src/stages/detectors/architecture-violation.ts: b5035317a61e5ebe
-  src/stages/detectors/capabilities-feature-mapping.ts: c969d5dfa45851e1
-  src/stages/detectors/convention-drift.ts: 450cb86924dfcf82
+  src/stages/detectors/capabilities-feature-mapping.ts: fa245f053f98a78a
+  src/stages/detectors/convention-drift.ts: 571500224c124e53
   src/stages/detectors/coverage-drop.ts: 809d13599596793e
-  src/stages/detectors/deliverable-integrity.ts: 2d14f1064eeb41a7
+  src/stages/detectors/deliverable-integrity.ts: d0fbc1dd05bd245a
   src/stages/detectors/dependency-cycle.ts: 873c8fdde00aa48b
   src/stages/detectors/doc-reference-integrity.ts: ac693db9c4bed946
   src/stages/detectors/evidence-mismatch.ts: c633778b8f9ec0af
@@ -275,7 +288,7 @@ attested_modules:
   src/stages/detectors/planned-backlog.ts: a6850576b00d4a44
   src/stages/detectors/project-context-drift.ts: d3643f369537a8e8
   src/stages/detectors/reference-integrity.ts: 8883766a4bf69c61
-  src/stages/detectors/scenario-coverage.ts: ff4cc3aa721abe26
+  src/stages/detectors/scenario-coverage.ts: 53f90149b1f152d6
   src/stages/detectors/slug-conflict.ts: 5d9b8feec12dce07
   src/stages/detectors/smoke-probe-demand.ts: 792b6d0d07f82a16
   src/stages/detectors/spec-conformance.ts: 8c74460349f0acef
@@ -288,46 +301,51 @@ attested_modules:
   src/stages/detectors/tech-stack-mismatch.ts: 099162aff2c2966b
   src/stages/detectors/unmapped-artifact.ts: b29f7e277d8187ae
   src/stages/detectors/untested-ac.ts: 90725ef1fc9245d8
-  src/stages/detectors/unverified-ac.ts: d78913ae463c88d6
+  src/stages/detectors/unverified-ac.ts: 6887c4d699afaad5
   src/stages/detectors/with-spec.ts: dcf3205e8d563574
   src/stages/disposition.ts: b7fd2e591235a326
   src/stages/drift.ts: d3993f3b168ceb34
+  src/stages/finding-parser.ts: d9cd56dbe3c3b9a7
   src/stages/graph-health.ts: a294f06796b0e293
   src/stages/junit-report.ts: f8466dc1e00140f1
-  src/stages/lint.ts: 37c06611ac1091d3
-  src/stages/perf.ts: 17888e913435e0fa
+  src/stages/lint.ts: e9c4505e587e6088
+  src/stages/perf.ts: 2b27c12427f65b2e
   src/stages/secret.ts: b90abc0e00c86219
   src/stages/skip-policy.ts: 1a6412d708561cf0
-  src/stages/smoke.ts: 486205cd691a2b0d
-  src/stages/spec-conformance.ts: ba68465c4715cc65
+  src/stages/smoke.ts: cbe55596f6b0a49e
+  src/stages/spec-conformance.ts: 1e9b052a2a268d7a
+  src/stages/test-run-cache.ts: 462a5ef1d30eb766
   src/stages/toolchain/coverage-tool.ts: 310883060ed6d92e
-  src/stages/toolchain/detect.ts: 832ec7b91bbe56d0
-  src/stages/toolchain/gate-config.ts: 35c31716191a3dee
+  src/stages/toolchain/detect.ts: 36d4947e5567bd5f
+  src/stages/toolchain/gate-config.ts: 818a0a549d875581
   src/stages/toolchain/language-config.ts: 65175718559b0710
   src/stages/toolchain/module-scope.ts: 88358ec3b84eedd3
   src/stages/toolchain/scoped-command.ts: f2dd6410c063279f
-  src/stages/toolchain/types.ts: 936dcb9264e046c0
-  src/stages/type.ts: d2859cd301bc002d
-  src/stages/types.ts: aa857145b7b81e22
+  src/stages/toolchain/types.ts: 05f018fb3dddc321
+  src/stages/type.ts: 0ac37e45b407446d
+  src/stages/types.ts: 95e8c9e13187d85b
   src/stages/uat.ts: 62ec3e37a124f8c5
-  src/stages/unit.ts: 98d958cb124136ea
-  src/stages/util.ts: 7943e14136ec2da7
-  src/stages/visual.ts: 48bbb6e77f09ed63
+  src/stages/unit.ts: b503350b0e5c7e5a
+  src/stages/util.ts: a024afe34884d653
+  src/stages/vacuous-tests.ts: 8e71b81e151325af
+  src/stages/visual.ts: 2b60dd991fa8124e
   src/ui: a4d0f0eb87fed960
   src/ui/panel.ts: 8b78cb14dafb28fb
   src/ui/pulse.ts: ee4255f5c6e49f51
-  src/ui/softShell.ts: c095f4185ab3d624
-  tests/adapters/anthropic.test.ts: 612e8d3f6ffc9b50
+  src/ui/softShell.ts: f21a30930c164afd
+  src/verdict/gate-progress.ts: ac75e3082cc97a40
+  src/verdict/verdict.ts: 2dcfb0e7408bd28d
+  tests/adapters/anthropic.test.ts: fa2fc7faf032a782
   tests/adapters/index.test.ts: 4454e6b4ea05a74f
   tests/adapters/transport.test.ts: 68f22e9e8df7b813
   tests/agents/loader.test.ts: a7df7b1c9a95d37d
   tests/cli/benchmark.test.ts: b4a87289605ee75f
-  tests/cli/clad.test.ts: 3b8a674c0c981c73
+  tests/cli/clad.test.ts: d559fff3bd530bad
   tests/cli/gate-golden-matrix.test.ts: 39cf615407a55abe
   tests/cli/init.test.ts: 3428a89708fc9330
   tests/cli/intent-onboarding.test.ts: 0681b98ce2e74c22
   tests/conformance/registry.test.ts: 018b1e5c0d8d4baf
-  tests/drive/loop.test.ts: dd3188240d7893d4
+  tests/drive/loop.test.ts: ae49bcfa745a8cdb
   tests/events/log.test.ts: 15e6d04c72431bfb
   tests/init/git-hook.test.ts: cef479cfb759bbe8
   tests/integration/loop-real-transport.test.ts: 7bd5bfa97eca28c6
@@ -359,9 +377,11 @@ attested_modules:
   tests/scenarios/ab/_vanilla-sim.ts: 1d7407f97cfc5e48
   tests/scenarios/ab/case-existing-adoption.test.ts: 430e095a4f08fec6
   tests/scenarios/ab/case-payment-saas.test.ts: 280404fbbfd0e6a3
-  tests/scenarios/existing-adoption-lifecycle.test.ts: 23011bf2cf1e1bfb
-  tests/scenarios/greenfield-lifecycle.test.ts: a3f3cefd204f03cf
-  tests/self-consistency.test.ts: 44ac8d86665ee84e
+  tests/scenarios/existing-adoption-lifecycle.test.ts: c1641cbe818087df
+  tests/scenarios/greenfield-lifecycle.test.ts: 434b58e6722aad1e
+  tests/scripts/test-count.test.ts: b00f58edc018f9d4
+  tests/scripts/version-bump.test.ts: 560ec3095887f192
+  tests/self-consistency.test.ts: e7fbd651f0c60c4a
   tests/serve/description-budget.test.ts: e1501907eff9b923
   tests/spec/ears.test.ts: e7385918da1d8c7a
   tests/spec/inventory.test.ts: 8dea6ae5d10ee513
@@ -377,7 +397,7 @@ attested_modules:
   tests/stages/architecture-violation.test.ts: f713ac001d4a797f
   tests/stages/audit.test.ts: 8785d8fb21008d49
   tests/stages/commit.test.ts: e387291e76ffc5d2
-  tests/stages/convention-drift.test.ts: f16176d8c9e97753
+  tests/stages/convention-drift.test.ts: f5638d887e5533f3
   tests/stages/cov.test.ts: c50dda16447f94ab
   tests/stages/coverage-drop.test.ts: 272d118239cda6be
   tests/stages/detector-purity.test.ts: cc8d4a60e6956198
@@ -389,7 +409,7 @@ attested_modules:
   tests/stages/hardcoded-secret.test.ts: bf6adf480abdc4e0
   tests/stages/harness-integrity.test.ts: 72e1770566c8e877
   tests/stages/inventory-drift.test.ts: 5641e9bdfadb2d52
-  tests/stages/lint.test.ts: 7bb84adc4f4e0820
+  tests/stages/lint.test.ts: a5106351ff7aeabc
   tests/stages/meta-integrity.test.ts: f0781f010e95edd0
   tests/stages/missing-implementation.test.ts: 2cf79871685fbdf4
   tests/stages/missing-tests.test.ts: feb49f3af71cc1af
@@ -398,22 +418,23 @@ attested_modules:
   tests/stages/reference-integrity.test.ts: 0f919c06f0ff96f3
   tests/stages/secret.test.ts: 06291c1daf9df45c
   tests/stages/smoke.test.ts: 99f97875d29ac5d3
-  tests/stages/spec-conformance.test.ts: 9f6ac08e09d7b10b
+  tests/stages/spec-conformance.test.ts: e3d809bcd00263a2
   tests/stages/stale-evidence.test.ts: 8e8622f17eb7f955
   tests/stages/stale-specification.test.ts: 09bd06db377d890c
   tests/stages/stale-tests.test.ts: 1467ceedb8019e86
   tests/stages/status-drift.test.ts: cff1092eeb23c268
   tests/stages/tech-stack-mismatch.test.ts: 878436ffd2f94c97
-  tests/stages/toolchain.test.ts: 8bf0f6b544215d44
+  tests/stages/toolchain.test.ts: 04e12be4ac1dee5c
+  tests/stages/toolchain/gate-config.test.ts: aef5813a6591b153
   tests/stages/type.test.ts: b57cf7455cae3b32
   tests/stages/uat.test.ts: 29c5bf3e7f3abc35
-  tests/stages/unit.test.ts: cb1eea0a14681948
+  tests/stages/unit.test.ts: 97781210eb81bb25
   tests/stages/unmapped-artifact.test.ts: 6bfdae66990fd63a
-  tests/stages/util.test.ts: 6e0e86140028f336
+  tests/stages/util.test.ts: dd95144b36bfd2b1
   tests/stages/visual.test.ts: dd819e7d25586b92
   tests/ui/panel.test.ts: ad9ea207f34b1c51
   tests/ui/pulse.test.ts: 30f1d091de9093ad
-  vitest.config.ts: 0abd6ec1dd506fee
+  vitest.config.ts: ea530544d4c3a338
 attested_features:
   F-001: ok
   F-0023ba22: ok
@@ -506,6 +527,7 @@ attested_features:
   F-0e84628e: ok
   F-0ed2db: ok
   F-0f2984d0: ok
+  F-0f4dd6: ok
   F-10cc42d1: ok
   F-12d740: ok
   F-15999130: ok
@@ -513,6 +535,7 @@ attested_features:
   F-16746b: ok
   F-17df0a: ok
   F-18e951: ok
+  F-195cb59e: ok
   F-1c9166: ok
   F-1d23a6: ok
   F-1e7a10c3: ok
@@ -525,24 +548,27 @@ attested_features:
   F-288864ae: ok
   F-2be3e3bb: ok
   F-2de65d: ok
+  F-2e28cc72: ok
   F-315fd7: ok
   F-31eeb8: ok
   F-32b1e0: ok
   F-35954d19: ok
-  F-36f11b: ok
   F-3788c2: ok
   F-37b4a8: ok
   F-39609db4: ok
   F-3a5339: ok
   F-3b3690: ok
   F-3c2bf8b9: ok
+  F-3fd220d8: ok
   F-40327b: ok
   F-417ff0: ok
   F-42af48: ok
   F-43d8e3: ok
+  F-4643d99d: ok
   F-4747ef: ok
+  F-47b8bee5: ok
+  F-49f6f2d2: ok
   F-49facde9: ok
-  F-4d87321f: ok
   F-4db939: ok
   F-4ef09f38: ok
   F-50ff43: ok
@@ -551,25 +577,26 @@ attested_features:
   F-569f4b37: ok
   F-56abaa: ok
   F-570a3f: ok
+  F-59af798d: ok
   F-59f093: ok
   F-5b188856: ok
   F-5b9f9f: ok
   F-5cac007a: ok
   F-5d3ed2: ok
   F-5f6b45: ok
-  F-60b842: ok
+  F-600272d7: ok
   F-63b989e5: ok
   F-64a5c159: ok
   F-65814a: ok
   F-67d2e9: ok
   F-67e33f: ok
-  F-6aebb9: ok
   F-6ba22c5c: ok
   F-6d943d: ok
   F-6e49fd24: ok
   F-6ed216f3: ok
   F-6f80e7: ok
   F-7076f7: ok
+  F-70ed1afd: ok
   F-723c81dd: ok
   F-7794a6bc: ok
   F-77a90ac6: ok
@@ -581,6 +608,8 @@ attested_features:
   F-803386ab: ok
   F-80d19d: ok
   F-836a90: ok
+  F-8476ccb1: ok
+  F-876b6f48: ok
   F-898783ee: ok
   F-8f419e: ok
   F-904495a5: ok
@@ -589,13 +618,16 @@ attested_features:
   F-95a096: ok
   F-96250595: ok
   F-96700032: ok
+  F-96d1f69d: ok
   F-987be195: ok
   F-99c6e5: ok
   F-9a3b61: ok
   F-9af291fa: ok
   F-9b643e: ok
   F-9d168287: ok
+  F-9d8ece66: ok
   F-a04cd9: ok
+  F-a4085adf: ok
   F-a4b512: ok
   F-a5228c: ok
   F-aa7197: ok
@@ -605,10 +637,13 @@ attested_features:
   F-af45042a: ok
   F-af96b1: ok
   F-b010427b: ok
+  F-b0c8ba2c: ok
   F-b0f898a6: ok
   F-b2094740: ok
   F-b43066: ok
   F-b61449: ok
+  F-b7873005: ok
+  F-b81d203e: ok
   F-b84c38: ok
   F-b8d74801: ok
   F-b99577: ok
@@ -619,11 +654,13 @@ attested_features:
   F-bc8ad013: ok
   F-bd07d7: ok
   F-bdcd90: ok
+  F-be5306eb: ok
   F-c037ae: ok
   F-c2c996: ok
   F-c3747d7d: ok
   F-c48eb2: ok
   F-c4c5ae: ok
+  F-c566f590: ok
   F-c58263b8: ok
   F-c6a32fff: ok
   F-c6c3daaf: ok
@@ -643,22 +680,26 @@ attested_features:
   F-dd8dc994: ok
   F-dddb89: ok
   F-e0f6c7: ok
+  F-e4159959: ok
   F-e53596dd: ok
   F-e7d59c88: ok
   F-e803c149: ok
   F-e8912be3: ok
   F-e940fffe: ok
-  F-ea1f13: ok
   F-eb732f: ok
+  F-ebbb20af: ok
   F-ede6fa75: ok
   F-ee47fc2b: ok
   F-ee5f643e: ok
   F-ef2fd9: ok
+  F-ef93141b: ok
   F-f334fa: ok
   F-f44d1b: ok
   F-f46d5c61: ok
+  F-f4e184f7: ok
   F-f6cc5e5a: ok
   F-f6d13e: ok
+  F-f9891175: ok
   F-fb9b48a5: ok
   F-fcece7: ok
   F-fe0f7a96: ok
