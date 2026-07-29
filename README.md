@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/qwerfunch/ironclad"><img src="https://img.shields.io/badge/ironclad-L4%20conformant-brightgreen" alt="ironclad"/></a>
   <a href="https://github.com/qwerfunch/ironclad"><img src="https://img.shields.io/badge/spec-v0.0.23-blue" alt="spec"/></a>
-  <img src="https://img.shields.io/badge/tests-2736%2F2736-brightgreen" alt="tests"/>
+  <img src="https://img.shields.io/badge/tests-2784%2F2784-brightgreen" alt="tests"/>
   <img src="https://img.shields.io/badge/detectors-41-brightgreen" alt="detectors"/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="license"/></a>
 </p>
@@ -31,15 +31,15 @@ So you can ship AI-written code held to **the same standard as human-written cod
 - **Traced** — **What shipped is on the record**: what was verified is stamped into committed content, who and when land in the local session ledger, and the why lives in the spec — so handoff and review skip the archaeology.
 - **Scales** — adding people and AIs would normally multiply conflicts and drift; because everyone works from one shared spec, those get caught automatically — so you can grow without it breaking down.
 
-cladding builds **itself** with cladding too — 266 of its 270 features cleared this same gate, the first L4 implementation of the [Ironclad](https://github.com/qwerfunch/ironclad) standard.
+cladding builds **itself** with cladding too — 272 of its 276 features cleared this same gate, the first L4 implementation of the [Ironclad](https://github.com/qwerfunch/ironclad) standard.
 
 <!-- ─────────────── Fork additions ─────────────── -->
 ## This fork — token-optimization layer
 
-> A fork of cladding **0.6.0** with a token-cost layer added. Stock behavior is
+> A fork of cladding **0.9.2** with a token-cost layer added. Stock behavior is
 > preserved; everything here is **additive and off by default**.
 
-**What changed vs stock 0.6.0**
+**What changed vs stock 0.9.2**
 
 | Addition | What it does | Default |
 |---|---|---|
@@ -72,15 +72,13 @@ export CLADDING_SPEC_LANG=en             # canonical authoring language (default
 export CLADDING_I18N=on                   # relay large non-English intent → English (SDK mode)
 ```
 
-Per-run instead of persistent: `CLADDING_HEADROOM=on clad drive`.
+Per-run instead of persistent: `CLADDING_HEADROOM=on clad run`.
 
 > **Two gotchas.** (1) The env var must reach the **actual `clad` process** — if
 > cladding runs as an MCP server / host plugin, set it in *that* process's env,
 > not just your terminal. (2) Headroom compression and the i18n relay only act in
 > **SDK mode** (`ANTHROPIC_API_KEY` set); in host mode they are no-ops (the
 > English-canonical authoring still applies).
-
-<!-- ─────────────── How it partners with the host LLM ─────────────── -->
 
 <!-- ─────────────── What changes ─────────────── -->
 
@@ -409,9 +407,9 @@ Reconcile the drift the update flagged.
 
 | Version | Conformance | Tests | Gate | Features |
 |---|---|---|---|---|
-| v0.9.2 (2026-07) | L4 · [self-declared](https://github.com/qwerfunch/ironclad/blob/main/GOVERNANCE.md) | 2736 / 2736 | 15 stages · 41 detectors | 270 (266 done) |
+| v0.9.2 (2026-07) | L4 · [self-declared](https://github.com/qwerfunch/ironclad/blob/main/GOVERNANCE.md) | 2784 / 2784 | 15 stages · 41 detectors | 276 (272 done) |
 
-<sub>248 test files · 6 capabilities · coverage drop blocked by the COVERAGE_DROP detector</sub>
+<sub>252 test files · 6 capabilities · coverage drop blocked by the COVERAGE_DROP detector</sub>
 
 > **Road to Ironclad 1.0** — 1.0 locks only when *two independent implementations pass the L4 conformance fixtures* ([GOVERNANCE § 1](https://github.com/qwerfunch/ironclad/blob/main/GOVERNANCE.md)). cladding is the first.
 
